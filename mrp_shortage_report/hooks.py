@@ -1,0 +1,6 @@
+app_name = "mrp_shortage_report"
+app_title = "MRP Shortage Report"
+app_publisher = "Nexgen ERP Technologies"
+app_description = "MRP Shortage Report for ERPNext"
+app_email = "info@nexgenerptechnologies.com"
+app_license = "mit"

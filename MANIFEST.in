@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include mrp_shortage_report *.css
+recursive-include mrp_shortage_report *.csv
+recursive-include mrp_shortage_report *.html
+recursive-include mrp_shortage_report *.ico
+recursive-include mrp_shortage_report *.js
+recursive-include mrp_shortage_report *.json
+recursive-include mrp_shortage_report *.md
+recursive-include mrp_shortage_report *.png
+recursive-include mrp_shortage_report *.py
+recursive-include mrp_shortage_report *.svg
+recursive-include mrp_shortage_report *.txt
+recursive-exclude mrp_shortage_report *.pyc
