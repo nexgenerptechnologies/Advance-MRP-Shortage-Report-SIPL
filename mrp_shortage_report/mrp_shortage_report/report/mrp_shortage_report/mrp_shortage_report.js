@@ -15,6 +15,12 @@ frappe.query_reports["MRP Shortage Report"] = {
 			"label": __("Project"),
 			"fieldtype": "Link",
 			"options": "Project"
+		},
+		{
+			"fieldname": "bom",
+			"label": __("BOM"),
+			"fieldtype": "Link",
+			"options": "BOM"
 		}
 	],
 	"tree": true,
