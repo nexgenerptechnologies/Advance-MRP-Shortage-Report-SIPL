@@ -12,15 +12,13 @@ def execute(filters=None):
 
 def get_columns():
     return [
-        {"fieldname": "name", "label": _("ID"), "fieldtype": "Data", "hidden": 1},
+        {"fieldname": "name", "label": _("Order / Component"), "fieldtype": "Data", "width": 250},
         {"fieldname": "parent", "label": _("Parent"), "fieldtype": "Data", "hidden": 1},
-        {"fieldname": "sales_order", "label": _("Sales Order"), "fieldtype": "Link", "options": "Sales Order", "width": 140},
         {"fieldname": "customer", "label": _("Customer"), "fieldtype": "Data", "width": 140},
         {"fieldname": "delivery_date", "label": _("Delivery Date"), "fieldtype": "Date", "width": 110},
-        {"fieldname": "item_code", "label": _("Item Code"), "fieldtype": "Link", "options": "Item", "width": 160},
         {"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 180},
         {"fieldname": "pending_qty", "label": _("Required Qty"), "fieldtype": "Float", "width": 110},
-        {"fieldname": "stock_qty", "label": _("Available Stock (Global)"), "fieldtype": "Float", "width": 170},
+        {"fieldname": "stock_qty", "label": _("Available Stock"), "fieldtype": "Float", "width": 130},
         {"fieldname": "po_qty", "label": _("Pending PO Qty"), "fieldtype": "Float", "width": 130},
         {"fieldname": "net_qty", "label": _("Net Shortage"), "fieldtype": "Float", "width": 110}
     ]
@@ -30,12 +28,12 @@ def get_data(filters):
     
     query = """
         SELECT
-            soi.name, soi.parent as sales_order, so.customer, so.delivery_date,
+            soi.name as soi_name, soi.parent as sales_order, so.customer, so.delivery_date,
             soi.item_code, soi.item_name, soi.qty, soi.delivered_qty
         FROM
-            `tabSales Order Item` soi
+            	abSales Order Item soi
         INNER JOIN
-            `tabSales Order` so ON soi.parent = so.name
+            	abSales Order so ON soi.parent = so.name
         WHERE
             so.docstatus = 1
             AND so.status NOT IN ('Closed', 'Completed')
@@ -66,14 +64,15 @@ def get_data(filters):
         po_qty = get_pending_po_qty(row.item_code, filters)
         net_qty = pending_qty - stock_qty - po_qty
         
+        # Unique parent node name
+        parent_node = f"{row.sales_order} | {row.item_code}"
+        
         # Append FG Row (Level 0)
         data.append({
-            "name": row.name,
+            "name": parent_node,
             "parent": "",
-            "sales_order": row.sales_order,
             "customer": row.customer,
             "delivery_date": row.delivery_date,
-            "item_code": row.item_code,
             "item_name": row.item_name,
             "pending_qty": pending_qty,
             "stock_qty": stock_qty,
@@ -92,23 +91,19 @@ def get_data(filters):
                     order_by="idx asc"
                 )
                 
-                # Fetch BOM base qty
                 bom_qty = frappe.db.get_value("BOM", default_bom, "quantity") or 1.0
                 
                 for comp in components:
-                    # Required qty of component = (Shortage of FG * Qty of comp in BOM) / BOM Base Qty
                     comp_req_qty = (net_qty * comp.bom_stock_qty) / bom_qty
                     comp_stock = get_actual_qty(comp.item_code)
                     comp_po = get_pending_po_qty(comp.item_code, filters)
                     comp_net = comp_req_qty - comp_stock - comp_po
                     
                     data.append({
-                        "name": f"{row.name}_{comp.item_code}",
-                        "parent": row.name, # Links to FG row
-                        "sales_order": row.sales_order,
+                        "name": f"{parent_node} -> {comp.item_code}",
+                        "parent": parent_node,
                         "customer": "",
                         "delivery_date": None,
-                        "item_code": comp.item_code,
                         "item_name": comp.item_name,
                         "pending_qty": comp_req_qty,
                         "stock_qty": comp_stock,
@@ -121,15 +116,15 @@ def get_data(filters):
 def get_actual_qty(item_code):
     return frappe.db.sql("""
         SELECT SUM(actual_qty) 
-        FROM `tabBin` 
+        FROM 	abBin 
         WHERE item_code = %s
     """, item_code)[0][0] or 0
 
 def get_pending_po_qty(item_code, filters):
     query = """
         SELECT SUM(poi.qty - poi.received_qty)
-        FROM `tabPurchase Order Item` poi
-        INNER JOIN `tabPurchase Order` po ON poi.parent = po.name
+        FROM 	abPurchase Order Item poi
+        INNER JOIN 	abPurchase Order po ON poi.parent = po.name
         WHERE poi.item_code = %(item_code)s
         AND po.docstatus = 1
         AND po.status NOT IN ('Closed', 'Completed')
