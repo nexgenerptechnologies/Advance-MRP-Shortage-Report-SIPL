@@ -1,0 +1,1 @@
+mrp_shortage_report.patches.v1_0.fix_report_type.execute
