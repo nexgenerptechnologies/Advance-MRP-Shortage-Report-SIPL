@@ -126,9 +126,9 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
         
     stock_qty, wh_dict = get_warehouse_stock(item_code)
     
-    # Calculate stock quantity in BOM UOM (Pcs) based on conversion factor
-    if conversion_factor and float(conversion_factor) != 0.0:
-        stock_qty_pcs = stock_qty / float(conversion_factor)
+    # Calculate stock quantity yield (Pcs) based on BOM Qty as requested
+    if bom_qty and float(bom_qty) != 0.0:
+        stock_qty_pcs = stock_qty / float(bom_qty)
     else:
         stock_qty_pcs = stock_qty
     
