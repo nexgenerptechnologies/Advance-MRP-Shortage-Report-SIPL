@@ -46,6 +46,7 @@ def get_columns(warehouse_cols):
         })
         
     cols.extend([
+        {"fieldname": "po_numbers", "label": _("PO Number"), "fieldtype": "Data", "width": 140},
         {"fieldname": "po_dates", "label": _("PO Date"), "fieldtype": "Data", "width": 110},
         {"fieldname": "po_qty", "label": _("Pending PO Qty"), "fieldtype": "Float", "width": 130},
         {"fieldname": "exp_dates", "label": _("Expected Delivery"), "fieldtype": "Data", "width": 130},
@@ -135,7 +136,7 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
     for wh in wh_dict.keys():
         warehouse_cols.add(wh)
         
-    po_qty, po_dates, exp_dates, suppliers = get_pending_po_details(item_code, filters)
+    po_qty, po_dates, exp_dates, suppliers, po_numbers = get_pending_po_details(item_code, filters)
     
     net_qty = req_qty - stock_qty - po_qty
     
@@ -162,6 +163,7 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
         "pending_qty": req_qty,
         "stock_qty": stock_qty,
         "stock_qty_pcs": stock_qty_pcs,
+        "po_numbers": po_numbers,
         "po_dates": po_dates,
         "po_qty": po_qty,
         "exp_dates": exp_dates,
@@ -219,6 +221,7 @@ def get_warehouse_stock(item_code):
 def get_pending_po_details(item_code, filters):
     query = """
         SELECT 
+            po.name as po_name,
             po.transaction_date, 
             poi.schedule_date, 
             po.supplier, 
@@ -243,11 +246,12 @@ def get_pending_po_details(item_code, filters):
     res = frappe.db.sql(query, values, as_dict=1)
     
     if not res:
-        return 0, "", "", ""
+        return 0, "", "", "", ""
         
     total_po_qty = sum([r.pending_qty for r in res])
     po_dates = ", ".join(list(set([str(r.transaction_date) for r in res if r.transaction_date])))
     exp_dates = ", ".join(list(set([str(r.schedule_date) for r in res if r.schedule_date])))
     suppliers = ", ".join(list(set([r.supplier for r in res if r.supplier])))
+    po_numbers = ", ".join(list(set([r.po_name for r in res if r.po_name])))
     
-    return total_po_qty, po_dates, exp_dates, suppliers
+    return total_po_qty, po_dates, exp_dates, suppliers, po_numbers
