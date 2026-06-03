@@ -5,33 +5,55 @@ def execute(filters=None):
     if not filters:
         filters = {}
         
-    columns = get_columns()
-    data = get_data(filters)
+    warehouse_cols = set()
+    data = get_data(filters, warehouse_cols)
+    
+    # Sort warehouse columns alphabetically
+    sorted_wh_cols = sorted(list(warehouse_cols))
+    
+    columns = get_columns(sorted_wh_cols)
     
     return columns, data
 
-def get_columns():
-    return [
+def get_columns(warehouse_cols):
+    cols = [
         {"fieldname": "name", "label": _("Order / Component"), "fieldtype": "Data", "width": 250},
         {"fieldname": "parent", "label": _("Parent"), "fieldtype": "Data", "hidden": 1},
         {"fieldname": "sales_order", "label": _("Sales Order"), "fieldtype": "Link", "options": "Sales Order", "width": 140},
         {"fieldname": "so_date", "label": _("SO Date"), "fieldtype": "Date", "width": 100},
+        {"fieldname": "so_qty", "label": _("SO Qty"), "fieldtype": "Float", "width": 100},
         {"fieldname": "customer", "label": _("Customer"), "fieldtype": "Data", "width": 140},
         {"fieldname": "delivery_date", "label": _("Delivery Date"), "fieldtype": "Date", "width": 110},
         {"fieldname": "item_group", "label": _("Item Group"), "fieldtype": "Link", "options": "Item Group", "width": 120},
         {"fieldname": "item_code", "label": _("Item Code"), "fieldtype": "Link", "options": "Item", "width": 150},
         {"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 180},
-        {"fieldname": "warehouse_str", "label": _("Warehouse Details"), "fieldtype": "Data", "width": 200},
+        {"fieldname": "description", "label": _("Description"), "fieldtype": "Data", "width": 150},
+        {"fieldname": "brand", "label": _("Brand"), "fieldtype": "Data", "width": 120},
+        {"fieldname": "bom_qty", "label": _("BOM Qty"), "fieldtype": "Float", "width": 100},
         {"fieldname": "pending_qty", "label": _("Required Qty"), "fieldtype": "Float", "width": 110},
-        {"fieldname": "stock_qty", "label": _("Available Stock"), "fieldtype": "Float", "width": 120},
+        {"fieldname": "stock_qty", "label": _("Available Stock (Global)"), "fieldtype": "Float", "width": 160},
+    ]
+    
+    # Dynamically inject warehouse columns
+    for wh in warehouse_cols:
+        cols.append({
+            "fieldname": wh,
+            "label": _(wh),
+            "fieldtype": "Float",
+            "width": 120
+        })
+        
+    cols.extend([
         {"fieldname": "po_dates", "label": _("PO Date"), "fieldtype": "Data", "width": 110},
         {"fieldname": "po_qty", "label": _("Pending PO Qty"), "fieldtype": "Float", "width": 130},
         {"fieldname": "exp_dates", "label": _("Expected Delivery"), "fieldtype": "Data", "width": 130},
         {"fieldname": "suppliers", "label": _("Supplier Name"), "fieldtype": "Data", "width": 150},
         {"fieldname": "net_qty", "label": _("Net Shortage"), "fieldtype": "Float", "width": 110}
-    ]
+    ])
+    
+    return cols
 
-def get_data(filters):
+def get_data(filters, warehouse_cols):
     data = []
     
     query = """
@@ -61,7 +83,6 @@ def get_data(filters):
         values["project"] = filters.get("project")
         
     if filters.get("bom"):
-        # Find the item for this BOM
         bom_item = frappe.db.get_value("BOM", filters.get("bom"), "item")
         if bom_item:
             conditions.append("soi.item_code = %(bom_item)s")
@@ -85,14 +106,22 @@ def get_data(filters):
             base_node_name=f"{row.sales_order} | {row.item_code}",
             so_data=row,
             filters=filters,
-            data=data
+            data=data,
+            warehouse_cols=warehouse_cols,
+            bom_qty=1.0 # Root level FG
         )
                     
     return data
 
-def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_data, filters, data):
-    item_group = frappe.db.get_value("Item", item_code, "item_group")
-    stock_qty, warehouse_str = get_warehouse_stock(item_code)
+def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_data, filters, data, warehouse_cols, bom_qty):
+    item_details = frappe.db.get_value("Item", item_code, ["item_group", "description", "brand"], as_dict=True) or {}
+    
+    stock_qty, wh_dict = get_warehouse_stock(item_code)
+    
+    # Collect unique warehouse names to generate columns later
+    for wh in wh_dict.keys():
+        warehouse_cols.add(wh)
+        
     po_qty, po_dates, exp_dates, suppliers = get_pending_po_details(item_code, filters)
     
     net_qty = req_qty - stock_qty - po_qty
@@ -102,17 +131,20 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
     else:
         node_name = f"{parent_node} -> {item_code}"
         
-    data.append({
+    row_dict = {
         "name": node_name,
         "parent": parent_node,
         "sales_order": so_data.sales_order,
         "so_date": so_data.so_date,
+        "so_qty": so_data.qty if parent_node == "" else None,
         "customer": so_data.customer if parent_node == "" else "",
         "delivery_date": so_data.delivery_date if parent_node == "" else None,
-        "item_group": item_group,
+        "item_group": item_details.get("item_group"),
         "item_code": item_code,
         "item_name": item_name,
-        "warehouse_str": warehouse_str,
+        "description": item_details.get("description"),
+        "brand": item_details.get("brand"),
+        "bom_qty": bom_qty if parent_node != "" else None,
         "pending_qty": req_qty,
         "stock_qty": stock_qty,
         "po_dates": po_dates,
@@ -120,7 +152,12 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
         "exp_dates": exp_dates,
         "suppliers": suppliers,
         "net_qty": net_qty
-    })
+    }
+    
+    # Dynamically inject warehouse quantities into the row dict
+    row_dict.update(wh_dict)
+    
+    data.append(row_dict)
     
     # Recursive explosion if shortage exists
     if net_qty > 0:
@@ -143,7 +180,9 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
                     base_node_name="",
                     so_data=so_data,
                     filters=filters,
-                    data=data
+                    data=data,
+                    warehouse_cols=warehouse_cols,
+                    bom_qty=comp.bom_qty # Quantity of this component per base BOM
                 )
 
 def get_warehouse_stock(item_code):
@@ -154,11 +193,11 @@ def get_warehouse_stock(item_code):
     """, item_code, as_dict=1)
     
     if not bins:
-        return 0, ""
+        return 0, {}
         
     total_qty = sum([b.actual_qty for b in bins])
-    wh_strings = [f"{b.warehouse} ({b.actual_qty:g})" for b in bins]
-    return total_qty, " | ".join(wh_strings)
+    wh_dict = {b.warehouse: b.actual_qty for b in bins}
+    return total_qty, wh_dict
 
 def get_pending_po_details(item_code, filters):
     query = """

@@ -20,7 +20,14 @@ frappe.query_reports["Advanced MRP Shortage Report"] = {
 			"fieldname": "bom",
 			"label": __("BOM"),
 			"fieldtype": "Link",
-			"options": "BOM"
+			"options": "BOM",
+			"get_query": function() {
+				return {
+					filters: {
+						"is_default": 1
+					}
+				}
+			}
 		}
 	],
 	"tree": true,
@@ -28,4 +35,3 @@ frappe.query_reports["Advanced MRP Shortage Report"] = {
 	"parent_field": "parent",
 	"initial_depth": 3
 };
-
