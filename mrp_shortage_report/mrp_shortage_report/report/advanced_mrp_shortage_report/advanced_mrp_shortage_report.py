@@ -30,8 +30,10 @@ def get_columns(warehouse_cols):
         {"fieldname": "description", "label": _("Description"), "fieldtype": "Data", "width": 150},
         {"fieldname": "brand", "label": _("Brand"), "fieldtype": "Data", "width": 120},
         {"fieldname": "bom_qty", "label": _("BOM Qty"), "fieldtype": "Float", "width": 100},
+        {"fieldname": "bom_uom", "label": _("BOM UOM"), "fieldtype": "Data", "width": 100},
         {"fieldname": "pending_qty", "label": _("Required Qty"), "fieldtype": "Float", "width": 110},
         {"fieldname": "stock_qty", "label": _("Available Stock (Global)"), "fieldtype": "Float", "width": 160},
+        {"fieldname": "stock_qty_pcs", "label": _("Available Stock (Global) (Pcs)"), "fieldtype": "Float", "width": 200},
     ]
     
     # Dynamically inject warehouse columns
@@ -108,15 +110,26 @@ def get_data(filters, warehouse_cols):
             filters=filters,
             data=data,
             warehouse_cols=warehouse_cols,
-            bom_qty=1.0 # Root level FG
+            bom_qty=1.0,
+            bom_uom=None,
+            conversion_factor=1.0
         )
                     
     return data
 
-def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_data, filters, data, warehouse_cols, bom_qty):
-    item_details = frappe.db.get_value("Item", item_code, ["item_group", "description", "brand"], as_dict=True) or {}
+def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_data, filters, data, warehouse_cols, bom_qty, bom_uom=None, conversion_factor=1.0):
+    item_details = frappe.db.get_value("Item", item_code, ["item_group", "description", "brand", "stock_uom"], as_dict=True) or {}
     
+    if not bom_uom:
+        bom_uom = item_details.get("stock_uom")
+        
     stock_qty, wh_dict = get_warehouse_stock(item_code)
+    
+    # Calculate stock quantity in BOM UOM (Pcs) based on conversion factor
+    if conversion_factor and float(conversion_factor) != 0.0:
+        stock_qty_pcs = stock_qty / float(conversion_factor)
+    else:
+        stock_qty_pcs = stock_qty
     
     # Collect unique warehouse names to generate columns later
     for wh in wh_dict.keys():
@@ -145,8 +158,10 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
         "description": item_details.get("description"),
         "brand": item_details.get("brand"),
         "bom_qty": bom_qty if parent_node != "" else None,
+        "bom_uom": bom_uom,
         "pending_qty": req_qty,
         "stock_qty": stock_qty,
+        "stock_qty_pcs": stock_qty_pcs,
         "po_dates": po_dates,
         "po_qty": po_qty,
         "exp_dates": exp_dates,
@@ -167,7 +182,7 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
             components = frappe.db.get_all(
                 "BOM Item", 
                 filters={"parent": default_bom}, 
-                fields=["item_code", "item_name", "qty as bom_qty"], 
+                fields=["item_code", "item_name", "qty as bom_qty", "uom", "conversion_factor"], 
                 order_by="idx asc"
             )
             for comp in components:
@@ -182,7 +197,9 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
                     filters=filters,
                     data=data,
                     warehouse_cols=warehouse_cols,
-                    bom_qty=comp.bom_qty # Quantity of this component per base BOM
+                    bom_qty=comp.bom_qty,
+                    bom_uom=comp.uom,
+                    conversion_factor=comp.conversion_factor or 1.0
                 )
 
 def get_warehouse_stock(item_code):
