@@ -126,9 +126,12 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
         
     stock_qty, wh_dict = get_warehouse_stock(item_code)
     
-    # Calculate stock quantity yield (Pcs) based on BOM Qty as requested
-    if bom_qty and float(bom_qty) != 0.0:
-        stock_qty_pcs = stock_qty / float(bom_qty)
+    # Calculate stock quantity yield (Pcs) only if BOM UOM is Kg
+    if bom_uom and bom_uom.strip().lower() in ['kg', 'kgs']:
+        if bom_qty and float(bom_qty) != 0.0:
+            stock_qty_pcs = stock_qty / float(bom_qty)
+        else:
+            stock_qty_pcs = stock_qty
     else:
         stock_qty_pcs = stock_qty
     
