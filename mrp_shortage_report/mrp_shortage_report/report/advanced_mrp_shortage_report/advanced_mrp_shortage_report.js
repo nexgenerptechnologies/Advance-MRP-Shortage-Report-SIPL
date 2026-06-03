@@ -17,6 +17,12 @@ frappe.query_reports["Advanced MRP Shortage Report"] = {
 			"options": "Project"
 		},
 		{
+			"fieldname": "sales_order",
+			"label": __("Sales Order"),
+			"fieldtype": "Link",
+			"options": "Sales Order"
+		},
+		{
 			"fieldname": "bom",
 			"label": __("BOM"),
 			"fieldtype": "Link",

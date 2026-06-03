@@ -85,6 +85,10 @@ def get_data(filters, warehouse_cols):
         conditions.append("so.project = %(project)s")
         values["project"] = filters.get("project")
         
+    if filters.get("sales_order"):
+        conditions.append("so.name = %(sales_order)s")
+        values["sales_order"] = filters.get("sales_order")
+        
     if filters.get("bom"):
         bom_item = frappe.db.get_value("BOM", filters.get("bom"), "item")
         if bom_item:
@@ -98,8 +102,12 @@ def get_data(filters, warehouse_cols):
     
     so_items = frappe.db.sql(query, values, as_dict=1)
     
+    # Track items processed via actual Sales Orders
+    processed_items = set()
+    
     for row in so_items:
         pending_qty = row.qty - row.delivered_qty
+        processed_items.add(row.item_code)
         
         explode_node(
             item_code=row.item_code,
@@ -115,6 +123,56 @@ def get_data(filters, warehouse_cols):
             bom_uom=None,
             conversion_factor=1.0
         )
+        
+    # HYBRID DEMAND: Fill in Project/BOM Pre-Orders if no SO exists yet
+    bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
+    
+    fetch_hybrid = False
+    bom_conditions = ["is_active = 1", "docstatus = 1"]
+    bom_values = {}
+    
+    if filters.get("project") and bom_project_field:
+        bom_conditions.append(f"{bom_project_field} = %(project_bom)s")
+        bom_values["project_bom"] = filters.get("project")
+        fetch_hybrid = True
+        
+    if filters.get("bom"):
+        bom_conditions.append("name = %(bom_name)s")
+        bom_values["bom_name"] = filters.get("bom")
+        fetch_hybrid = True
+        
+    if fetch_hybrid:
+        query_bom = "SELECT name, item, quantity FROM `tabBOM` WHERE " + " AND ".join(bom_conditions)
+        boms = frappe.db.sql(query_bom, bom_values, as_dict=1)
+        
+        for bom in boms:
+            if bom.item not in processed_items:
+                processed_items.add(bom.item)
+                item_name = frappe.db.get_value("Item", bom.item, "item_name")
+                
+                # Mock a blank SO dict to fulfill the signature
+                mock_so = frappe._dict({
+                    "sales_order": "",
+                    "so_date": None,
+                    "qty": bom.quantity,
+                    "customer": "",
+                    "delivery_date": None
+                })
+                
+                explode_node(
+                    item_code=bom.item,
+                    item_name=item_name,
+                    req_qty=bom.quantity,
+                    parent_node="",
+                    base_node_name=f"Pre-Order BOM | {bom.item}",
+                    so_data=mock_so,
+                    filters=filters,
+                    data=data,
+                    warehouse_cols=warehouse_cols,
+                    bom_qty=1.0,
+                    bom_uom=None,
+                    conversion_factor=1.0
+                )
                     
     return data
 
@@ -243,7 +301,7 @@ def get_pending_po_details(item_code, filters):
         values["company"] = filters.get("company")
         
     if filters.get("project"):
-        query += " AND po.project = %(project)s"
+        query += " AND poi.project = %(project)s"
         values["project"] = filters.get("project")
         
     res = frappe.db.sql(query, values, as_dict=1)
