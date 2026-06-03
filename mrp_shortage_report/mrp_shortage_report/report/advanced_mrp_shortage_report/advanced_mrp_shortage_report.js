@@ -1,7 +1,7 @@
 // Copyright (c) 2024, Nexgen ERP Technologies and contributors
 // For license information, please see license.txt
 
-frappe.query_reports["MRP Shortage Report"] = {
+frappe.query_reports["Advanced MRP Shortage Report"] = {
 	"filters": [
 		{
 			"fieldname": "company",
@@ -28,3 +28,4 @@ frappe.query_reports["MRP Shortage Report"] = {
 	"parent_field": "parent",
 	"initial_depth": 3
 };
+
