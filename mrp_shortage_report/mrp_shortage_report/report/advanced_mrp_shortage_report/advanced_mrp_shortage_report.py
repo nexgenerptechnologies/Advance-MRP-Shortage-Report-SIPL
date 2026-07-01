@@ -65,7 +65,7 @@ def get_data(filters, warehouse_cols):
         SELECT
             soi.name as soi_name, soi.parent as sales_order, so.transaction_date as so_date, 
             so.customer, so.delivery_date,
-            soi.item_code, soi.item_name, soi.qty, soi.delivered_qty
+            soi.item_code, soi.item_name, soi.qty, soi.delivered_qty, so.project as project
         FROM
             `tabSales Order Item` soi
         INNER JOIN
@@ -126,7 +126,8 @@ def get_data(filters, warehouse_cols):
             bom_uom=None,
             conversion_factor=1.0,
             global_stock_tracker=global_stock_tracker,
-            global_po_tracker=global_po_tracker
+            global_po_tracker=global_po_tracker,
+            row_project=row.get("project")
         )
         
     # HYBRID DEMAND: Fill in Project/BOM Pre-Orders if no SO exists yet
@@ -147,7 +148,7 @@ def get_data(filters, warehouse_cols):
         fetch_hybrid = True
         
     if fetch_hybrid:
-        query_bom = "SELECT name, item, quantity FROM `tabBOM` WHERE " + " AND ".join(bom_conditions)
+        query_bom = f"SELECT name, item, quantity, {bom_project_field} as project FROM `tabBOM` WHERE " + " AND ".join(bom_conditions)
         boms = frappe.db.sql(query_bom, bom_values, as_dict=1)
         
         for bom in boms:
@@ -177,12 +178,13 @@ def get_data(filters, warehouse_cols):
                     bom_uom=None,
                     conversion_factor=1.0,
                     global_stock_tracker=global_stock_tracker,
-                    global_po_tracker=global_po_tracker
+                    global_po_tracker=global_po_tracker,
+                    row_project=bom.get("project")
                 )
                     
     return data
 
-def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_data, filters, data, warehouse_cols, bom_qty, bom_uom, conversion_factor, global_stock_tracker, global_po_tracker):
+def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_data, filters, data, warehouse_cols, bom_qty, bom_uom, conversion_factor, global_stock_tracker, global_po_tracker, row_project=None):
     item_details = frappe.db.get_value("Item", item_code, ["item_group", "description", "brand", "stock_uom"], as_dict=True) or {}
     
     if not bom_uom:
@@ -197,9 +199,11 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
             "wh_dict": wh_dict
         }
         
-    if item_code not in global_po_tracker:
-        total_po, po_dates, exp_dates, suppliers, po_numbers = get_pending_po_details(item_code, filters)
-        global_po_tracker[item_code] = {
+    po_tracker_key = (item_code, row_project)
+    
+    if po_tracker_key not in global_po_tracker:
+        total_po, po_dates, exp_dates, suppliers, po_numbers = get_pending_po_details(item_code, row_project, filters)
+        global_po_tracker[po_tracker_key] = {
             "total_po": total_po,
             "allocated": 0,
             "po_dates": po_dates,
@@ -209,7 +213,7 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
         }
         
     stock_info = global_stock_tracker[item_code]
-    po_info = global_po_tracker[item_code]
+    po_info = global_po_tracker[po_tracker_key]
     
     # 1. Allocate Stock
     stock_left_to_allocate = stock_info["total_available"] - stock_info["allocated"]
@@ -309,7 +313,8 @@ def explode_node(item_code, item_name, req_qty, parent_node, base_node_name, so_
                 bom_uom=comp.uom,
                 conversion_factor=comp.conversion_factor or 1.0,
                 global_stock_tracker=global_stock_tracker,
-                global_po_tracker=global_po_tracker
+                global_po_tracker=global_po_tracker,
+                row_project=row_project
             )
 
 def get_warehouse_stock(item_code):
@@ -326,7 +331,7 @@ def get_warehouse_stock(item_code):
     wh_dict = {b.warehouse: b.actual_qty for b in bins}
     return total_qty, wh_dict
 
-def get_pending_po_details(item_code, filters):
+def get_pending_po_details(item_code, row_project, filters):
     query = """
         SELECT 
             po.name as po_name,
@@ -347,7 +352,10 @@ def get_pending_po_details(item_code, filters):
         query += " AND po.company = %(company)s"
         values["company"] = filters.get("company")
         
-    if filters.get("project"):
+    if row_project:
+        query += " AND poi.project = %(row_project)s"
+        values["row_project"] = row_project
+    elif filters.get("project"):
         query += " AND poi.project = %(project)s"
         values["project"] = filters.get("project")
         
