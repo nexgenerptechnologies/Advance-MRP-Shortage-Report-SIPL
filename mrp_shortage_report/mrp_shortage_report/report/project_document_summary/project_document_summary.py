@@ -159,11 +159,10 @@ def get_purchase_orders(project, only_pending):
         INNER JOIN `tabPurchase Order` po ON poi.parent = po.name
         WHERE poi.project = %(project)s
         AND po.docstatus = 1
-        AND po.status NOT IN ('Closed', 'Completed')
     """
     
     if only_pending:
-        query += " AND poi.qty > poi.received_qty"
+        query += " AND po.status NOT IN ('Closed', 'Completed') AND poi.qty > poi.received_qty"
         
     query += " GROUP BY po.name"
     
