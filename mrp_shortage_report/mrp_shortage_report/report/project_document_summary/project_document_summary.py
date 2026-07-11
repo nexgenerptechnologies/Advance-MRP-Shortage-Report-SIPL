@@ -78,7 +78,7 @@ def execute(filters=None):
         {"value": f"{percent_used:.2f}%", "indicator": "Red" if percent_used > 100 else "Green", "label": _("% Budget Used")}
     ]
     
-    return columns, data, None, None, None, report_summary
+    return columns, data, None, None, report_summary
 
 def get_columns():
     return [
