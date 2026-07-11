@@ -18,9 +18,18 @@ def execute(filters=None):
     actual_expenditures = 0.0
     pending_po_value = 0.0
     
-    # 1. Fetch Budget
-    estimated_cost = frappe.db.get_value("Project", project, "estimated_cost") or 0.0
-    
+    # 1. Fetch Budget Gracefully (Handles different ERPNext versions and custom fields)
+    estimated_cost = 0.0
+    try:
+        project_doc = frappe.get_cached_doc("Project", project)
+        estimated_cost = (
+            project_doc.get("estimated_costing") or 
+            project_doc.get("estimated_cost") or 
+            project_doc.get("project_value") or 
+            0.0
+        )
+    except Exception:
+        pass    
     # Determine what to fetch based on filter
     fetch_pi = doc_type_filter in ["Purchase Invoice + Journal Entries", "Purchase Invoice + JEs + Pending POs"]
     fetch_je = doc_type_filter in ["Purchase Invoice + Journal Entries", "Purchase Invoice + JEs + Pending POs"]
