@@ -1,13 +1,5 @@
 frappe.query_reports["All Projects Budget Overview"] = {
-	"filters": [
-		{
-			"fieldname": "status",
-			"label": __("Project Status"),
-			"fieldtype": "Select",
-			"options": "\nOpen\nCompleted\nCancelled",
-			"default": "Open"
-		}
-	],
+	"filters": [],
 	"formatter": function(value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
 		

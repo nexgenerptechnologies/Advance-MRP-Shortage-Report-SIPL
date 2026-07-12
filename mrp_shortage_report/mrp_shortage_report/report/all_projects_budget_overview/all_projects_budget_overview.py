@@ -11,12 +11,7 @@ def execute(filters=None):
     columns = get_columns()
     data = []
     
-    # Get all projects matching the status filter
-    project_filters = {}
-    if filters.get("status"):
-        project_filters["status"] = filters.get("status")
-        
-    projects = frappe.get_all("Project", filters=project_filters, fields=["name", "project_name"])
+    projects = frappe.get_all("Project", fields=["name", "project_name"])
     
     total_budget_all = 0.0
     total_expenditures_all = 0.0
