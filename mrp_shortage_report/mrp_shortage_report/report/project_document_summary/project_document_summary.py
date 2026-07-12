@@ -18,7 +18,7 @@ def execute(filters=None):
     actual_expenditures = 0.0
     pending_po_value = 0.0
     
-    # 1. Fetch Budget Gracefully (Handles different ERPNext versions and custom fields)
+    # 1. Fetch Budget Gracefully
     estimated_cost = 0.0
     try:
         project_doc = frappe.get_cached_doc("Project", project)
@@ -30,34 +30,42 @@ def execute(filters=None):
         )
     except Exception:
         pass    
-    # Determine what to fetch based on filter
+        
+    # 2. ALWAYS Calculate KPIs globally for the project
+    actual_expenditures = 0.0
+    pending_po_value = 0.0
+    
+    # Calculate PI expenditures
+    pi_summary = get_purchase_invoices(project)
+    for row in pi_summary:
+        actual_expenditures += row.get("basic_value", 0.0)
+        
+    # Calculate JE expenditures
+    je_summary = get_journal_entries(project)
+    for row in je_summary:
+        actual_expenditures += row.get("basic_value", 0.0)
+        
+    # Calculate Pending PO Value
+    pending_po_summary = get_purchase_orders(project, only_pending=True)
+    for row in pending_po_summary:
+        pending_po_value += row.get("basic_value", 0.0)
+        
+    # 3. Build the data table based on the filter
+    data = []
     fetch_pi = doc_type_filter in ["Purchase Invoice + Journal Entries", "Purchase Invoice + JEs + Pending POs"]
     fetch_je = doc_type_filter in ["Purchase Invoice + Journal Entries", "Purchase Invoice + JEs + Pending POs"]
     fetch_pending_po = doc_type_filter == "Purchase Invoice + JEs + Pending POs"
     fetch_all_po = doc_type_filter == "Purchase Order Only"
     
-    # 2. Fetch Purchase Invoices
     if fetch_pi:
-        pi_data = get_purchase_invoices(project)
-        for row in pi_data:
-            actual_expenditures += row.get("basic_value", 0.0)
-            data.append(row)
-            
-    # 3. Fetch Journal Entries
+        data.extend(pi_summary)
     if fetch_je:
-        je_data = get_journal_entries(project)
-        for row in je_data:
-            actual_expenditures += row.get("basic_value", 0.0)
-            data.append(row)
-            
-    # 4. Fetch Purchase Orders (Pending or All)
-    if fetch_pending_po or fetch_all_po:
-        only_pending = not fetch_all_po
-        po_data = get_purchase_orders(project, only_pending)
-        for row in po_data:
-            if fetch_pending_po:
-                pending_po_value += row.get("basic_value", 0.0)
-            data.append(row)
+        data.extend(je_summary)
+    if fetch_pending_po:
+        data.extend(pending_po_summary)
+    if fetch_all_po:
+        all_po_summary = get_purchase_orders(project, only_pending=False)
+        data.extend(all_po_summary)
             
     # Sort data by Date descending
     data = sorted(data, key=lambda x: x.get("date") or "", reverse=True)
@@ -78,7 +86,22 @@ def execute(filters=None):
         {"value": f"{percent_used:.2f}%", "indicator": "Red" if percent_used > 100 else "Green", "label": _("% Budget Used")}
     ]
     
-    return columns, data, None, None, report_summary
+    # Generate Donut Chart
+    chart = {
+        "data": {
+            "labels": [_("Budget Used"), _("Balance Remaining")],
+            "datasets": [
+                {
+                    "name": _("Budget"),
+                    "values": [total_committed, balance if balance > 0 else 0]
+                }
+            ]
+        },
+        "type": "donut",
+        "colors": ["#fc4f30", "#e5e5e5"]
+    }
+    
+    return columns, data, None, chart, report_summary
 
 def get_columns():
     return [
@@ -101,7 +124,7 @@ def get_purchase_invoices(project):
             SUM(pii.base_net_amount) as basic_value
         FROM `tabPurchase Invoice Item` pii
         INNER JOIN `tabPurchase Invoice` pi ON pii.parent = pi.name
-        WHERE pii.project = %(project)s
+        WHERE (pii.project = %(project)s OR pi.project = %(project)s)
         AND pi.docstatus = 1
         GROUP BY pi.name
     """
@@ -166,7 +189,7 @@ def get_purchase_orders(project, only_pending):
             ) as basic_value
         FROM `tabPurchase Order Item` poi
         INNER JOIN `tabPurchase Order` po ON poi.parent = po.name
-        WHERE poi.project = %(project)s
+        WHERE (poi.project = %(project)s OR po.project = %(project)s)
         AND po.docstatus = 1
     """
     
