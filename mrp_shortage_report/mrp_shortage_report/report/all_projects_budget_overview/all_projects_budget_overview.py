@@ -16,7 +16,7 @@ def execute(filters=None):
     if filters.get("status"):
         project_filters["status"] = filters.get("status")
         
-    projects = frappe.get_all("Project", filters=project_filters, fields=["name", "project_name", "estimated_costing", "estimated_cost", "project_value"])
+    projects = frappe.get_all("Project", filters=project_filters, fields=["name", "project_name"])
     
     total_budget_all = 0.0
     total_expenditures_all = 0.0
@@ -26,10 +26,11 @@ def execute(filters=None):
         project = proj.name
         
         # 1. Fetch Budget Gracefully
+        proj_doc = frappe.get_cached_doc("Project", project)
         estimated_cost = (
-            proj.get("estimated_costing") or 
-            proj.get("estimated_cost") or 
-            proj.get("project_value") or 
+            proj_doc.get("estimated_costing") or 
+            proj_doc.get("estimated_cost") or 
+            proj_doc.get("project_value") or 
             0.0
         )
         
