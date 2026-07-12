@@ -73,7 +73,8 @@ def execute(filters=None):
     # Prepare Summary
     total_committed = actual_expenditures + pending_po_value
     balance = estimated_cost - total_committed
-    percent_used = (total_committed / estimated_cost * 100) if estimated_cost > 0 else 0.0
+    percent_expended = (actual_expenditures / estimated_cost * 100) if estimated_cost > 0 else 0.0
+    percent_committed = (total_committed / estimated_cost * 100) if estimated_cost > 0 else 0.0
     
     currency = frappe.defaults.get_global_default("default_currency") or "INR"
     
@@ -83,22 +84,23 @@ def execute(filters=None):
         {"value": pending_po_value, "indicator": "Red", "label": _("Pending PO Value"), "datatype": "Currency", "currency": currency},
         {"value": total_committed, "indicator": "Purple", "label": _("Total Committed"), "datatype": "Currency", "currency": currency},
         {"value": balance, "indicator": "Green" if balance >= 0 else "Red", "label": _("Balance"), "datatype": "Currency", "currency": currency},
-        {"value": f"{percent_used:.2f}%", "indicator": "Red" if percent_used > 100 else "Green", "label": _("% Budget Used")}
+        {"value": f"{percent_expended:.2f}%", "indicator": "Orange", "label": _("% Budget Expended")},
+        {"value": f"{percent_committed:.2f}%", "indicator": "Red" if percent_committed > 100 else "Green", "label": _("% Budget Committed")}
     ]
     
     # Generate Donut Chart
     chart = {
         "data": {
-            "labels": [_("Budget Used"), _("Balance Remaining")],
+            "labels": [_("Actual Expenditures"), _("Pending PO Value"), _("Balance Remaining")],
             "datasets": [
                 {
-                    "name": _("Budget"),
-                    "values": [total_committed, balance if balance > 0 else 0]
+                    "name": _("Budget Breakdown"),
+                    "values": [actual_expenditures, pending_po_value, balance if balance > 0 else 0]
                 }
             ]
         },
         "type": "donut",
-        "colors": ["#fc4f30", "#e5e5e5"]
+        "colors": ["#fd8c00", "#ff0000", "#28a745"]
     }
     
     return columns, data, None, chart, report_summary
@@ -182,7 +184,7 @@ def get_purchase_orders(project, only_pending):
             po.supplier_name as party_name,
             SUM(
                 CASE WHEN %(only_pending)s = 1 THEN 
-                    (CASE WHEN (poi.qty - poi.received_qty) > 0 THEN (poi.qty - poi.received_qty) * poi.base_rate ELSE 0 END)
+                    (CASE WHEN (poi.base_net_amount - IFNULL(poi.billed_amt, 0)) > 0 THEN (poi.base_net_amount - IFNULL(poi.billed_amt, 0)) ELSE 0 END)
                 ELSE 
                     poi.base_net_amount 
                 END
