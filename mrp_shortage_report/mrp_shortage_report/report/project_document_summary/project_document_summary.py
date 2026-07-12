@@ -176,6 +176,26 @@ def get_journal_entries(project):
     return final_res
 
 def get_purchase_orders(project, only_pending):
+    if not only_pending:
+        # Fetch the FULL value of any PO linked to the project (matches the old report)
+        query = """
+            SELECT
+                'Purchase Order' as type,
+                po.name as document_no,
+                po.transaction_date as date,
+                po.supplier_name as party_name,
+                MAX(po.base_net_total) as basic_value,
+                MAX(po.base_taxes_and_charges_added) as gst,
+                MAX(po.base_grand_total) as total
+            FROM `tabPurchase Order` po
+            LEFT JOIN `tabPurchase Order Item` poi ON poi.parent = po.name
+            WHERE (po.project = %(project)s OR poi.project = %(project)s)
+            AND po.docstatus = 1
+            GROUP BY po.name
+        """
+        return frappe.db.sql(query, {"project": project}, as_dict=1)
+
+    # Calculate exactly what is pending (used for KPIs)
     query = """
         SELECT
             'Purchase Order' as type,
@@ -183,24 +203,20 @@ def get_purchase_orders(project, only_pending):
             po.transaction_date as date,
             po.supplier_name as party_name,
             SUM(
-                CASE WHEN %(only_pending)s = 1 THEN 
-                    (CASE WHEN (poi.base_net_amount - IFNULL(poi.billed_amt, 0)) > 0 THEN (poi.base_net_amount - IFNULL(poi.billed_amt, 0)) ELSE 0 END)
-                ELSE 
-                    poi.base_net_amount 
-                END
+                CASE WHEN (poi.base_net_amount - IFNULL(poi.billed_amt, 0)) > 0 
+                THEN (poi.base_net_amount - IFNULL(poi.billed_amt, 0)) 
+                ELSE 0 END
             ) as basic_value
         FROM `tabPurchase Order Item` poi
         INNER JOIN `tabPurchase Order` po ON poi.parent = po.name
         WHERE (poi.project = %(project)s OR po.project = %(project)s)
         AND po.docstatus = 1
+        AND po.status NOT IN ('Closed', 'Completed') 
+        AND (poi.base_net_amount - IFNULL(poi.billed_amt, 0)) > 0
+        GROUP BY po.name
     """
     
-    if only_pending:
-        query += " AND po.status NOT IN ('Closed', 'Completed') AND poi.qty > poi.received_qty"
-        
-    query += " GROUP BY po.name"
-    
-    res = frappe.db.sql(query, {"project": project, "only_pending": 1 if only_pending else 0}, as_dict=1)
+    res = frappe.db.sql(query, {"project": project}, as_dict=1)
     
     for r in res:
         doc = frappe.db.get_value("Purchase Order", r.document_no, ["base_net_total", "base_taxes_and_charges_added"], as_dict=1)
