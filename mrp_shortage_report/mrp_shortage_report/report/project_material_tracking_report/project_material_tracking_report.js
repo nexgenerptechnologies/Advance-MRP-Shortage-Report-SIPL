@@ -13,7 +13,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"options": "Project"
 		},
 		{
-			"fieldname": "bom_no",
+			"fieldname": "bom",
 			"label": __("BOM"),
 			"fieldtype": "Link",
 			"options": "BOM"
@@ -47,21 +47,12 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("Status"),
 			"fieldtype": "Select",
 			"options": "\nPending PO\nPO Raised\nPartially Received\nFully Received\nIn Production\nCompleted"
+		},
+		{
+			"fieldname": "warehouse",
+			"label": __("Warehouse"),
+			"fieldtype": "Link",
+			"options": "Warehouse"
 		}
-	],
-	"formatter": function(value, row, column, data, default_formatter) {
-		value = default_formatter(value, row, column, data);
-
-		if (column.fieldname == "status") {
-			if (data.status == "Fully Received" || data.status == "Completed") {
-				value = "<span style='color:green'>" + value + "</span>";
-			} else if (data.status == "Pending PO") {
-				value = "<span style='color:red'>" + value + "</span>";
-			} else if (data.status == "PO Raised" || data.status == "Partially Received" || data.status == "In Production") {
-				value = "<span style='color:orange'>" + value + "</span>";
-			}
-		}
-
-		return value;
-	}
+	]
 };

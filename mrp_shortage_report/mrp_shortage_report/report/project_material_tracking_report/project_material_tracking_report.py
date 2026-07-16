@@ -4,183 +4,277 @@ from frappe import _
 def execute(filters=None):
     if not filters:
         filters = {}
-
+        
     columns = get_columns()
     data = get_data(filters)
-
+    
     return columns, data
 
 def get_columns():
     return [
-        {"fieldname": "item_code", "label": _("Item Code"), "fieldtype": "Link", "options": "Item", "width": 150},
-        {"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 200},
-        {"fieldname": "brand", "label": _("Brand"), "fieldtype": "Link", "options": "Brand", "width": 120},
+        {"fieldname": "project", "label": _("Project"), "fieldtype": "Link", "options": "Project", "width": 140},
+        {"fieldname": "bom", "label": _("BOM"), "fieldtype": "Link", "options": "BOM", "width": 140},
+        {"fieldname": "bom_date", "label": _("BOM Upload Date"), "fieldtype": "Date", "width": 120},
+        {"fieldname": "bom_modified", "label": _("BOM Last Modified Date"), "fieldtype": "Date", "width": 140},
+        {"fieldname": "item_code", "label": _("Item Code"), "fieldtype": "Link", "options": "Item", "width": 140},
+        {"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 150},
+        {"fieldname": "description", "label": _("Description"), "fieldtype": "Data", "width": 150},
+        {"fieldname": "brand", "label": _("Brand"), "fieldtype": "Data", "width": 120},
         {"fieldname": "item_group", "label": _("Item Group"), "fieldtype": "Link", "options": "Item Group", "width": 120},
-        {"fieldname": "is_fg_sfg", "label": _("Is FG/SFG"), "fieldtype": "Data", "width": 100},
-        {"fieldname": "project", "label": _("Project"), "fieldtype": "Link", "options": "Project", "width": 150},
-        {"fieldname": "allocated_name", "label": _("Allocated Name"), "fieldtype": "Data", "width": 200},
-        {"fieldname": "bom_no", "label": _("BOM"), "fieldtype": "Link", "options": "BOM", "width": 150},
-        {"fieldname": "required_qty", "label": _("Required Qty"), "fieldtype": "Float", "width": 120},
-        {"fieldname": "ordered_qty", "label": _("Ordered Qty"), "fieldtype": "Float", "width": 120},
-        {"fieldname": "received_qty", "label": _("Received Qty"), "fieldtype": "Float", "width": 120},
-        {"fieldname": "purchase_order", "label": _("Purchase Order"), "fieldtype": "Link", "options": "Purchase Order", "width": 150},
-        {"fieldname": "supplier", "label": _("Supplier"), "fieldtype": "Link", "options": "Supplier", "width": 150},
-        {"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 130}
+        {"fieldname": "bom_qty", "label": _("BOM Qty"), "fieldtype": "Float", "width": 100},
+        {"fieldname": "project_qty", "label": _("Project Qty (Req. Qty)"), "fieldtype": "Float", "width": 140},
+        {"fieldname": "stock_qty", "label": _("Stock Qty"), "fieldtype": "Float", "width": 100},
+        {"fieldname": "allocated_qty", "label": _("Allocated Qty"), "fieldtype": "Float", "width": 110},
+        {"fieldname": "allocation_name", "label": _("Allocation Name"), "fieldtype": "Data", "width": 140},
+        {"fieldname": "shortage_qty", "label": _("Shortage Qty"), "fieldtype": "Float", "width": 110},
+        {"fieldname": "po_number", "label": _("PO Number"), "fieldtype": "Data", "width": 140},
+        {"fieldname": "po_date", "label": _("PO Date"), "fieldtype": "Data", "width": 110},
+        {"fieldname": "po_qty", "label": _("PO Qty"), "fieldtype": "Float", "width": 100},
+        {"fieldname": "received_qty", "label": _("Received Qty."), "fieldtype": "Float", "width": 110},
+        {"fieldname": "balance_qty", "label": _("Balance Qty"), "fieldtype": "Float", "width": 110},
+        {"fieldname": "supplier", "label": _("Supplier Name"), "fieldtype": "Data", "width": 140},
+        {"fieldname": "exp_delivery_date", "label": _("Exp. Delivery Date"), "fieldtype": "Data", "width": 130},
+        {"fieldname": "net_shortage", "label": _("Net Shortage"), "fieldtype": "Float", "width": 110},
+        {"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 140},
     ]
 
 def get_data(filters):
     data = []
     
-    # Track unique rows to avoid duplicates
-    processed_keys = set()
+    # 1. Fetch Projects/BOM Demand
+    demand_data = fetch_demand(filters)
     
-    # 1. Fetch from Purchase Orders
-    po_conditions = "po.docstatus = 1"
-    po_values = {}
+    # 2. Fetch Factory Stock (Items in Warehouse not covered by BOM/Project)
+    factory_data = fetch_factory_stock(filters, demand_data)
     
-    if filters.get("project"):
-        po_conditions += " AND poi.project = %(project)s"
-        po_values["project"] = filters.get("project")
-    if filters.get("item_code"):
-        po_conditions += " AND poi.item_code = %(item_code)s"
-        po_values["item_code"] = filters.get("item_code")
-    if filters.get("brand"):
-        po_conditions += " AND poi.brand = %(brand)s"
-        po_values["brand"] = filters.get("brand")
-    if filters.get("item_group"):
-        po_conditions += " AND poi.item_group = %(item_group)s"
-        po_values["item_group"] = filters.get("item_group")
-    if filters.get("supplier"):
-        po_conditions += " AND po.supplier = %(supplier)s"
-        po_values["supplier"] = filters.get("supplier")
-    if filters.get("purchase_order"):
-        po_conditions += " AND po.name = %(purchase_order)s"
-        po_values["purchase_order"] = filters.get("purchase_order")
+    # Combine
+    all_rows = demand_data + factory_data
+    
+    # Apply standard item filters (Item Group, Brand, etc.)
+    all_rows = apply_item_filters(all_rows, filters)
+    
+    # Apply Status Filter
+    if filters.get("status"):
+        all_rows = [r for r in all_rows if r.get("status") == filters.get("status")]
         
-    po_query = f"""
-        SELECT 
-            poi.item_code, poi.item_name, poi.brand, poi.item_group,
-            poi.project, po.name as purchase_order, po.supplier,
-            poi.qty as ordered_qty, poi.received_qty, poi.bom as bom_no
+    return all_rows
+
+def fetch_demand(filters):
+    rows = []
+    # Identify how Project Links to BOM. Using similar logic to advanced report
+    bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
+    
+    conditions = ["docstatus = 1", "is_active = 1"]
+    values = {}
+    
+    if filters.get("project") and bom_project_field:
+        conditions.append(f"{bom_project_field} = %(project)s")
+        values["project"] = filters.get("project")
+    if filters.get("bom"):
+        conditions.append("name = %(bom)s")
+        values["bom"] = filters.get("bom")
+        
+    bom_query = f"SELECT name, item, quantity, creation, modified, {bom_project_field or 'NULL'} as project FROM `tabBOM` WHERE " + " AND ".join(conditions)
+    boms = frappe.db.sql(bom_query, values, as_dict=1)
+    
+    processed_nodes = set()
+    
+    for bom in boms:
+        # Explode BOM to get components
+        components = frappe.db.sql("""
+            SELECT item_code, item_name, description, qty as bom_qty, qty as req_qty
+            FROM `tabBOM Item`
+            WHERE parent = %s
+        """, bom.name, as_dict=1)
+        
+        for comp in components:
+            row = build_row(
+                item_code=comp.item_code,
+                project=bom.project,
+                bom_name=bom.name,
+                bom_date=bom.creation,
+                bom_modified=bom.modified,
+                bom_qty=comp.bom_qty,
+                project_qty=comp.req_qty, # Base required qty
+                filters=filters
+            )
+            if row:
+                rows.append(row)
+                processed_nodes.add((bom.project, comp.item_code))
+                
+    return rows
+
+def fetch_factory_stock(filters, demand_data):
+    rows = []
+    # If a specific warehouse is filtered, we look for items in that warehouse
+    wh = filters.get("warehouse")
+    if not wh:
+        return rows # If no warehouse filter, we only show demand-based items by default unless specified
+        
+    # Get all items in this warehouse that have stock > 0 OR have pending POs
+    items_in_wh = frappe.db.sql("""
+        SELECT DISTINCT item_code 
+        FROM `tabBin` 
+        WHERE warehouse = %s AND actual_qty > 0
+    """, wh, as_dict=1)
+    
+    po_items_in_wh = frappe.db.sql("""
+        SELECT DISTINCT poi.item_code 
         FROM `tabPurchase Order Item` poi
-        JOIN `tabPurchase Order` po ON poi.parent = po.name
-        WHERE {po_conditions}
+        INNER JOIN `tabPurchase Order` po ON poi.parent = po.name
+        WHERE poi.warehouse = %s AND po.docstatus = 1 AND poi.qty > poi.received_qty
+    """, wh, as_dict=1)
+    
+    all_factory_items = set([i.item_code for i in items_in_wh] + [i.item_code for i in po_items_in_wh])
+    
+    # Filter out items already in demand_data if they match the project (or just add them as standalone rows)
+    existing_demand_items = set([r.get("item_code") for r in demand_data])
+    
+    for item_code in all_factory_items:
+        if item_code not in existing_demand_items:
+            row = build_row(
+                item_code=item_code,
+                project=None,
+                bom_name=None,
+                bom_date=None,
+                bom_modified=None,
+                bom_qty=0,
+                project_qty=0,
+                filters=filters
+            )
+            if row:
+                rows.append(row)
+                
+    return rows
+
+def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, project_qty, filters):
+    if filters.get("item_code") and item_code != filters.get("item_code"):
+        return None
+        
+    item = frappe.db.get_value("Item", item_code, ["item_name", "description", "brand", "item_group"], as_dict=True) or {}
+    
+    # 1. Stock Info (Filtered by Warehouse if provided)
+    wh_filter = filters.get("warehouse")
+    stock_qty = get_stock_qty(item_code, wh_filter)
+    
+    shortage_qty = max(0, project_qty - stock_qty)
+    
+    # 2. PO Details
+    po_number, po_date, po_qty, received_qty, supplier, exp_delivery_date = get_po_details(item_code, project, wh_filter)
+    
+    # 3. Calculations
+    balance_qty = max(0, po_qty - received_qty)
+    net_shortage = max(0, shortage_qty - balance_qty)
+    
+    # 4. Status Determination
+    status = determine_status(project_qty, stock_qty, po_qty, received_qty)
+    
+    return {
+        "project": project,
+        "bom": bom_name,
+        "bom_date": bom_date.date() if bom_date else None,
+        "bom_modified": bom_modified.date() if bom_modified else None,
+        "item_code": item_code,
+        "item_name": item.get("item_name"),
+        "description": item.get("description"),
+        "brand": item.get("brand"),
+        "item_group": item.get("item_group"),
+        "bom_qty": bom_qty,
+        "project_qty": project_qty,
+        "stock_qty": stock_qty,
+        "allocated_qty": 0, # Assuming no strict material request reservation logic in scope, placeholder
+        "allocation_name": project, # Usually Project or Work Order name
+        "shortage_qty": shortage_qty,
+        "po_number": po_number,
+        "po_date": po_date,
+        "po_qty": po_qty,
+        "received_qty": received_qty,
+        "balance_qty": balance_qty,
+        "supplier": supplier,
+        "exp_delivery_date": exp_delivery_date,
+        "net_shortage": net_shortage,
+        "status": status
+    }
+
+def get_stock_qty(item_code, warehouse=None):
+    if warehouse:
+        return frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty") or 0.0
+    else:
+        bins = frappe.db.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
+        return sum([b.actual_qty for b in bins])
+
+def get_po_details(item_code, project=None, warehouse=None):
+    conditions = ["poi.item_code = %(item_code)s", "po.docstatus = 1", "po.status != 'Cancelled'"]
+    values = {"item_code": item_code}
+    
+    if project:
+        # Standard ERPNext has project on PO item
+        conditions.append("poi.project = %(project)s")
+        values["project"] = project
+        
+    if warehouse:
+        conditions.append("poi.warehouse = %(warehouse)s")
+        values["warehouse"] = warehouse
+        
+    query = f"""
+        SELECT po.name, po.transaction_date, poi.qty, poi.received_qty, po.supplier, poi.schedule_date
+        FROM `tabPurchase Order Item` poi
+        INNER JOIN `tabPurchase Order` po ON poi.parent = po.name
+        WHERE {" AND ".join(conditions)}
+        ORDER BY po.transaction_date DESC
     """
-    po_items = frappe.db.sql(po_query, po_values, as_dict=True)
     
-    for row in po_items:
-        # Determine Status
-        status = ""
-        if row.received_qty >= row.ordered_qty and row.ordered_qty > 0:
-            status = "Fully Received"
-        elif row.received_qty > 0 and row.received_qty < row.ordered_qty:
-            status = "Partially Received"
-        elif row.received_qty == 0 and row.ordered_qty > 0:
-            status = "PO Raised"
-            
-        # Check Work Orders for In Production / Completed status
-        wo = frappe.db.get_value("Work Order", {"production_item": row.item_code, "project": row.project, "docstatus": 1}, ["status"], as_dict=True)
-        if wo:
-            if wo.status == "In Process":
-                status = "In Production"
-            elif wo.status == "Completed":
-                status = "Completed"
-                
-        # FG / SFG Check
-        has_bom = frappe.db.exists("BOM", {"item": row.item_code, "is_active": 1})
-        is_fg_sfg = "Yes" if has_bom else "No"
-        
-        # Allocated Name
-        allocated_name = f"{row.project} - {row.ordered_qty}" if row.project else ""
-        
-        row_dict = {
-            "item_code": row.item_code,
-            "item_name": row.item_name,
-            "brand": row.brand,
-            "item_group": row.item_group,
-            "is_fg_sfg": is_fg_sfg,
-            "project": row.project,
-            "allocated_name": allocated_name,
-            "bom_no": row.bom_no,
-            "required_qty": row.ordered_qty, # Fallback
-            "ordered_qty": row.ordered_qty,
-            "received_qty": row.received_qty,
-            "purchase_order": row.purchase_order,
-            "supplier": row.supplier,
-            "status": status
-        }
-        
-        if filters.get("bom") and filters.get("bom") != row.bom_no:
-            continue
-            
-        if filters.get("status") and filters.get("status") != status:
-            continue
-            
-        key = (row.item_code, row.project, row.purchase_order)
-        processed_keys.add(key)
-        data.append(row_dict)
-        
-    # 2. Fetch from Material Requests for Pending POs
-    mr_conditions = "mr.docstatus = 1 AND mr.material_request_type = 'Purchase' AND mri.ordered_qty < mri.qty"
-    mr_values = {}
+    pos = frappe.db.sql(query, values, as_dict=1)
     
-    if filters.get("project"):
-        mr_conditions += " AND mri.project = %(project)s"
-        mr_values["project"] = filters.get("project")
-    if filters.get("item_code"):
-        mr_conditions += " AND mri.item_code = %(item_code)s"
-        mr_values["item_code"] = filters.get("item_code")
-    if filters.get("brand"):
-        mr_conditions += " AND mri.brand = %(brand)s"
-        mr_values["brand"] = filters.get("brand")
-    if filters.get("item_group"):
-        mr_conditions += " AND mri.item_group = %(item_group)s"
-        mr_values["item_group"] = filters.get("item_group")
+    if not pos:
+        return "", "", 0.0, 0.0, "", ""
         
-    # If a specific PO or Supplier is filtered, Pending POs won't match, so skip
-    if not filters.get("purchase_order") and not filters.get("supplier"):
-        mr_query = f"""
-            SELECT 
-                mri.item_code, mri.item_name, mri.brand, mri.item_group,
-                mri.project, (mri.qty - mri.ordered_qty) as pending_qty, mri.qty as required_qty
-            FROM `tabMaterial Request Item` mri
-            JOIN `tabMaterial Request` mr ON mri.parent = mr.name
-            WHERE {mr_conditions}
-        """
-        mr_items = frappe.db.sql(mr_query, mr_values, as_dict=True)
+    po_numbers = ", ".join(list(set([p.name for p in pos])))
+    po_dates = ", ".join(list(set([str(p.transaction_date) for p in pos if p.transaction_date])))
+    suppliers = ", ".join(list(set([p.supplier for p in pos])))
+    exp_dates = ", ".join(list(set([str(p.schedule_date) for p in pos if p.schedule_date])))
+    
+    total_po_qty = sum([p.qty for p in pos])
+    total_received = sum([p.received_qty for p in pos])
+    
+    return po_numbers, po_dates, total_po_qty, total_received, suppliers, exp_dates
+
+def determine_status(req_qty, stock_qty, po_qty, received_qty):
+    # Pending PO, PO Raised, Partially Received, Fully Received, In Production, Completed
+    if req_qty > 0 and stock_qty >= req_qty:
+        return "Completed"
+    
+    if po_qty == 0:
+        return "Pending PO"
         
-        for row in mr_items:
-            status = "Pending PO"
+    if po_qty > 0 and received_qty == 0:
+        return "PO Raised"
+        
+    if received_qty > 0 and received_qty < po_qty:
+        return "Partially Received"
+        
+    if received_qty >= po_qty and received_qty > 0:
+        return "Fully Received"
+        
+    return "Pending"
+
+def apply_item_filters(rows, filters):
+    if not filters:
+        return rows
+        
+    filtered_rows = []
+    for r in rows:
+        match = True
+        if filters.get("brand") and r.get("brand") != filters.get("brand"):
+            match = False
+        if filters.get("item_group") and r.get("item_group") != filters.get("item_group"):
+            match = False
+        if filters.get("supplier") and r.get("supplier") not in (r.get("supplier") or ""):
+            match = False
+        if filters.get("purchase_order") and filters.get("purchase_order") not in (r.get("po_number") or ""):
+            match = False
             
-            # FG / SFG Check
-            has_bom = frappe.db.exists("BOM", {"item": row.item_code, "is_active": 1})
-            is_fg_sfg = "Yes" if has_bom else "No"
+        if match:
+            filtered_rows.append(r)
             
-            allocated_name = f"{row.project} - {row.pending_qty}" if row.project else ""
-            
-            row_dict = {
-                "item_code": row.item_code,
-                "item_name": row.item_name,
-                "brand": row.brand,
-                "item_group": row.item_group,
-                "is_fg_sfg": is_fg_sfg,
-                "project": row.project,
-                "allocated_name": allocated_name,
-                "bom_no": "",
-                "required_qty": row.required_qty,
-                "ordered_qty": 0,
-                "received_qty": 0,
-                "purchase_order": "",
-                "supplier": "",
-                "status": status
-            }
-            
-            if filters.get("status") and filters.get("status") != status:
-                continue
-                
-            key = (row.item_code, row.project, "Pending")
-            if key not in processed_keys:
-                processed_keys.add(key)
-                data.append(row_dict)
-                
-    return data
+    return filtered_rows
