@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from frappe.utils import getdate, nowdate, date_diff
 
 def execute(filters=None):
     if not filters:
@@ -17,6 +18,8 @@ def execute(filters=None):
     # Track KPIs
     actual_expenditures = 0.0
     pending_po_value = 0.0
+    payment_received = 0.0
+    project_days = 0
     
     # 1. Fetch Budget Gracefully
     estimated_cost = 0.0
@@ -28,12 +31,15 @@ def execute(filters=None):
             project_doc.get("project_value") or 
             0.0
         )
+        if project_doc.creation:
+            project_days = date_diff(nowdate(), getdate(project_doc.creation))
     except Exception:
         pass    
         
     # 2. ALWAYS Calculate KPIs globally for the project
     actual_expenditures = 0.0
     pending_po_value = 0.0
+    payment_received = 0.0
     
     # Calculate PI expenditures
     pi_summary = get_purchase_invoices(project)
@@ -49,6 +55,11 @@ def execute(filters=None):
     pending_po_summary = get_purchase_orders(project, only_pending=True)
     for row in pending_po_summary:
         pending_po_value += row.get("basic_value", 0.0)
+        
+    # Calculate Payment Received
+    payment_entries = get_payment_entries(project)
+    for row in payment_entries:
+        payment_received += row.get("basic_value", 0.0)
         
     # 3. Build the data table based on the filter
     data = []
@@ -75,17 +86,21 @@ def execute(filters=None):
     balance = estimated_cost - total_committed
     percent_expended = (actual_expenditures / estimated_cost * 100) if estimated_cost > 0 else 0.0
     percent_committed = (total_committed / estimated_cost * 100) if estimated_cost > 0 else 0.0
+    percent_payment_received = (payment_received / estimated_cost * 100) if estimated_cost > 0 else 0.0
     
     currency = frappe.defaults.get_global_default("default_currency") or "INR"
     
     report_summary = [
         {"value": estimated_cost, "indicator": "Blue", "label": _("Total Budget"), "datatype": "Currency", "currency": currency},
+        {"value": payment_received, "indicator": "Green", "label": _("Payment Received"), "datatype": "Currency", "currency": currency},
+        {"value": f"{percent_payment_received:.2f}%", "indicator": "Green", "label": _("% Payment Received")},
         {"value": actual_expenditures, "indicator": "Orange", "label": _("Actual Expenditures"), "datatype": "Currency", "currency": currency},
         {"value": pending_po_value, "indicator": "Red", "label": _("Pending PO Value"), "datatype": "Currency", "currency": currency},
         {"value": total_committed, "indicator": "Purple", "label": _("Total Committed"), "datatype": "Currency", "currency": currency},
         {"value": balance, "indicator": "Green" if balance >= 0 else "Red", "label": _("Balance"), "datatype": "Currency", "currency": currency},
         {"value": f"{percent_expended:.2f}%", "indicator": "Orange", "label": _("% Budget Expended")},
-        {"value": f"{percent_committed:.2f}%", "indicator": "Red" if percent_committed > 100 else "Green", "label": _("% Budget Committed")}
+        {"value": f"{percent_committed:.2f}%", "indicator": "Red" if percent_committed > 100 else "Green", "label": _("% Budget Committed")},
+        {"value": project_days, "indicator": "Blue", "label": _("Project Days")}
     ]
     
     # Generate Donut Chart
@@ -212,5 +227,48 @@ def get_purchase_orders(project, only_pending):
         else:
             r.gst = 0.0
         r.total = r.basic_value + r.gst
+        
+    return res
+
+def get_payment_entries(project):
+    # 1. Payments directly tagged with the project
+    query1 = """
+        SELECT
+            'Payment Entry' as type,
+            name as document_no,
+            posting_date as date,
+            party_name as party_name,
+            base_received_amount as basic_value
+        FROM `tabPayment Entry`
+        WHERE project = %(project)s
+        AND docstatus = 1
+        AND payment_type = 'Receive'
+    """
+    res1 = frappe.db.sql(query1, {"project": project}, as_dict=1)
+    
+    # 2. Payments linked to Sales Invoices of this project
+    query2 = """
+        SELECT
+            'Payment Entry' as type,
+            pe.name as document_no,
+            pe.posting_date as date,
+            pe.party_name as party_name,
+            SUM(per.allocated_amount) as basic_value
+        FROM `tabPayment Entry` pe
+        INNER JOIN `tabPayment Entry Reference` per ON per.parent = pe.name
+        INNER JOIN `tabSales Invoice` si ON si.name = per.reference_name AND per.reference_doctype = 'Sales Invoice'
+        WHERE si.project = %(project)s
+        AND (IFNULL(pe.project, '') != %(project)s)
+        AND pe.docstatus = 1
+        AND pe.payment_type = 'Receive'
+        GROUP BY pe.name
+    """
+    res2 = frappe.db.sql(query2, {"project": project}, as_dict=1)
+    
+    # Combine and add gst/total so they don't break format
+    res = res1 + res2
+    for r in res:
+        r.gst = 0.0
+        r.total = r.basic_value
         
     return res
