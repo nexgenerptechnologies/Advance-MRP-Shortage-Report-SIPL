@@ -20,7 +20,8 @@ def get_columns():
         {"fieldname": "bom_last_modified_date", "label": _("BOM Last Modified Date"), "fieldtype": "Date", "width": 160},
         {"fieldname": "required_qty", "label": _("Required Qty"), "fieldtype": "Float", "width": 120},
         {"fieldname": "shortage", "label": _("Shortage"), "fieldtype": "Float", "width": 120},
-        {"fieldname": "missing_components", "label": _("Missing Components"), "fieldtype": "Int", "width": 150},
+        {"fieldname": "missing_components", "label": _("Missing Components"), "fieldtype": "Data", "width": 150},
+        {"fieldname": "missing_items_html", "label": _("Missing Items HTML"), "fieldtype": "Data", "hidden": 1},
         {"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 150}
     ]
 
