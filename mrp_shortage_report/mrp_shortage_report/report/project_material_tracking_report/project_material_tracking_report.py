@@ -172,7 +172,7 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
     net_shortage = max(0, shortage_qty - balance_qty)
     
     # 4. Status Determination
-    status = determine_status(project_qty, stock_qty, po_qty, received_qty)
+    status = determine_status(project_qty, stock_qty, po_qty, received_qty, project)
     
     return {
         "project": project,
@@ -244,10 +244,15 @@ def get_po_details(item_code, project=None, warehouse=None):
     
     return po_numbers, po_dates, total_po_qty, total_received, suppliers, exp_dates
 
-def determine_status(req_qty, stock_qty, po_qty, received_qty):
-    # Pending PO, PO Raised, Partially Received, Fully Received, In Production, Completed
+def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None):
+    if project:
+        is_project_completed = frappe.db.get_value("Project", project, "status") == "Completed"
+        has_invoice = frappe.db.exists("Sales Invoice", {"project": project, "docstatus": 1})
+        if is_project_completed or has_invoice:
+            return "Project Completed"
+            
     if req_qty > 0 and stock_qty >= req_qty:
-        return "Completed"
+        return "In Stock"
     
     if po_qty == 0:
         return "Pending PO"

@@ -48,7 +48,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"fieldname": "status",
 			"label": __("Status"),
 			"fieldtype": "Select",
-			"options": "\nPending PO\nPO Raised\nPartially Received\nFully Received\nIn Production\nCompleted"
+			"options": "\nPending PO\nPO Raised\nPartially Received\nFully Received\nIn Stock\nProject Completed\nIn Production"
 		},
 		{
 			"fieldname": "warehouse",
@@ -65,8 +65,9 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			else if (data.status == "PO Raised") color = "orange";
 			else if (data.status == "Partially Received") color = "blue";
 			else if (data.status == "Fully Received") color = "green";
-			else if (data.status == "Completed") color = "darkgreen";
-			else if (data.status == "In Production") color = "purple";
+			else if (data.status == "In Stock") color = "darkgreen";
+			else if (data.status == "Project Completed") color = "purple";
+			else if (data.status == "In Production") color = "yellow";
 			
 			value = `<span class='indicator ${color}'>${data.status}</span>`;
 		}
