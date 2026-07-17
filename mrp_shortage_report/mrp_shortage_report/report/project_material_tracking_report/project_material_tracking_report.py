@@ -182,8 +182,8 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
         "bom_qty": bom_qty,
         "project_qty": project_qty,
         "stock_qty": stock_qty,
-        "allocated_qty": 0, # Assuming no strict material request reservation logic in scope, placeholder
-        "allocation_name": project, # Usually Project or Work Order name
+        "allocated_qty": 0,
+        "allocation_name": project if (stock_qty > 0) else "",
         "shortage_qty": shortage_qty,
         "po_number": po_number,
         "po_date": po_date,
@@ -273,6 +273,10 @@ def apply_item_filters(rows, filters):
             match = False
         if filters.get("purchase_order") and filters.get("purchase_order") not in (r.get("po_number") or ""):
             match = False
+            
+        if filters.get("warehouse"):
+            if r.get("stock_qty") == 0 and r.get("po_qty") == 0:
+                match = False
             
         if match:
             filtered_rows.append(r)
