@@ -47,7 +47,7 @@ frappe.query_reports["Subassembly Readiness Report"] = {
 
 window.show_missing_items_dialog = function(encoded_json) {
     let items = JSON.parse(decodeURIComponent(encoded_json));
-    let html = "<table class='table table-bordered'><thead><tr><th>Item Code</th><th>Item Name</th><th>Shortage Qty</th></tr></thead><tbody>";
+    let html = "<div style='max-height: 400px; overflow-y: auto; overflow-x: hidden;'><table class='table table-bordered table-hover'><thead><tr><th>Item Code</th><th>Item Name</th><th>Shortage Qty</th></tr></thead><tbody>";
     let csv = "Item Code,Item Name,Shortage Qty\n";
     
     items.forEach(item => {
@@ -55,16 +55,31 @@ window.show_missing_items_dialog = function(encoded_json) {
         let esc_name = (item.item_name || "").toString().replace(/"/g, '""');
         csv += `"${item.item_code}","${esc_name}","${item.shortage}"\n`;
     });
-    html += "</tbody></table>";
+    html += "</tbody></table></div>";
     
     let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     let url = URL.createObjectURL(blob);
     
-    let download_btn = `<div style="margin-top: 15px;"><a href="${url}" download="missing_components.csv" class="btn btn-primary btn-sm">Download as Excel (CSV)</a></div>`;
-    
-    frappe.msgprint({
+    let d = new frappe.ui.Dialog({
         title: __('Missing Components'),
-        message: html + download_btn,
-        wide: true
+        size: 'large',
+        fields: [
+            {
+                fieldname: 'items_html',
+                fieldtype: 'HTML',
+                options: html
+            }
+        ],
+        primary_action_label: __('Download as Excel'),
+        primary_action(values) {
+            let a = document.createElement('a');
+            a.href = url;
+            a.download = "missing_components.csv";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
     });
+    
+    d.show();
 };
