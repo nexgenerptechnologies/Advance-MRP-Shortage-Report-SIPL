@@ -88,15 +88,16 @@ def get_data(filters):
         
         bom_items = frappe.db.sql("SELECT item_code, item_name, qty FROM `tabBOM Item` WHERE parent=%s", (b.bom,), as_dict=1)
         for child in bom_items:
-            child_stock = get_stock_qty(child.item_code)
-            child_req = (child.qty / b.quantity) * required_qty
-            if child_stock < child_req:
-                missing_count += 1
-                missing_items.append({
-                    "item_code": child.item_code,
-                    "item_name": child.item_name,
-                    "shortage": child_req - child_stock
-                })
+            if shortage > 0:
+                child_stock = get_stock_qty(child.item_code)
+                child_req = (child.qty / b.quantity) * shortage
+                if child_stock < child_req:
+                    missing_count += 1
+                    missing_items.append({
+                        "item_code": child.item_code,
+                        "item_name": child.item_name,
+                        "shortage": child_req - child_stock
+                    })
                 
         missing_items_json = json.dumps(missing_items) if missing_items else ""
                 
