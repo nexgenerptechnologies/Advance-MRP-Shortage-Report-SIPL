@@ -70,24 +70,32 @@ def get_data(filters):
         project = b.project_from_bom or filters.get("project") or ""
         item_name = frappe.db.get_value("Item", b.item_code, "item_name")
         
-        wo_qty = 0
+        required_qty = b.quantity
         if project:
-            wo_qty = frappe.db.sql("SELECT sum(qty) FROM `tabWork Order` WHERE bom_no=%s AND project=%s AND status != 'Stopped' AND status != 'Cancelled'", (b.bom, project))
-        else:
-            wo_qty = frappe.db.sql("SELECT sum(qty) FROM `tabWork Order` WHERE bom_no=%s AND status != 'Stopped' AND status != 'Cancelled'", (b.bom,))
-            
-        wo_qty = wo_qty[0][0] if wo_qty and wo_qty[0][0] else 0
-        required_qty = wo_qty or b.quantity
+            parent_bom = frappe.db.get_value("BOM", {bom_project_field: project}, "name") if bom_project_field else None
+            if parent_bom:
+                req_qty_in_project = frappe.db.sql("SELECT sum(qty) FROM `tabBOM Item` WHERE parent=%s AND item_code=%s", (parent_bom, b.item_code))
+                if req_qty_in_project and req_qty_in_project[0][0]:
+                    required_qty = req_qty_in_project[0][0]
+                    
         stock_qty = get_stock_qty(b.item_code)
         shortage = max(0, required_qty - stock_qty)
         
         missing_count = 0
-        bom_items = frappe.db.sql("SELECT item_code, qty FROM `tabBOM Item` WHERE parent=%s", (b.bom,), as_dict=1)
+        missing_items_html = "<table class='table table-bordered'><thead><tr><th>Item Code</th><th>Item Name</th><th>Shortage Qty</th></tr></thead><tbody>"
+        has_missing = False
+        
+        bom_items = frappe.db.sql("SELECT item_code, item_name, qty FROM `tabBOM Item` WHERE parent=%s", (b.bom,), as_dict=1)
         for child in bom_items:
             child_stock = get_stock_qty(child.item_code)
             child_req = (child.qty / b.quantity) * required_qty
             if child_stock < child_req:
                 missing_count += 1
+                has_missing = True
+                missing_items_html += f"<tr><td>{child.item_code}</td><td>{child.item_name}</td><td>{child_req - child_stock}</td></tr>"
+                
+        missing_items_html += "</tbody></table>"
+        if not has_missing: missing_items_html = ""
                 
         status = "Completed"
         if project:
@@ -112,6 +120,7 @@ def get_data(filters):
             "required_qty": required_qty,
             "shortage": shortage,
             "missing_components": missing_count,
+            "missing_items_html": missing_items_html,
             "status": status
         })
         
@@ -120,17 +129,6 @@ def get_data(filters):
 def calculate_status(shortage, missing_count, bom_no, project):
     if shortage <= 0:
         return "Completed"
-        
-    in_production = False
-    if project:
-        wos = frappe.db.get_all("Work Order", filters={"bom_no": bom_no, "project": project, "status": "In Process"})
-        if wos: in_production = True
-    else:
-        wos = frappe.db.get_all("Work Order", filters={"bom_no": bom_no, "status": "In Process"})
-        if wos: in_production = True
-        
-    if in_production:
-        return "In Production"
     
     if missing_count == 0:
         return "Ready for Production"
