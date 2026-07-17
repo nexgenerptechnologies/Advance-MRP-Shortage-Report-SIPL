@@ -71,8 +71,13 @@ def fetch_demand(filters):
         conditions.append(f"{bom_project_field} = %(project)s")
         values["project"] = filters.get("project")
     if filters.get("bom"):
-        conditions.append("name = %(bom)s")
-        values["bom"] = filters.get("bom")
+        boms = filters.get("bom")
+        if isinstance(boms, list):
+            conditions.append("name IN %(bom)s")
+            values["bom"] = tuple(boms)
+        else:
+            conditions.append("name = %(bom)s")
+            values["bom"] = boms
         
     bom_query = f"SELECT name, item, quantity, creation, modified, {bom_project_field or 'NULL'} as project FROM `tabBOM` WHERE " + " AND ".join(conditions)
     boms = frappe.db.sql(bom_query, values, as_dict=1)
