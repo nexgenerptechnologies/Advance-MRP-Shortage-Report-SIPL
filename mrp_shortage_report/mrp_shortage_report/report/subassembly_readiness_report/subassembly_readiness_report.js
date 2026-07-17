@@ -37,10 +37,34 @@ frappe.query_reports["Subassembly Readiness Report"] = {
 			
 			value = `<span class='indicator ${color}'>${data.status}</span>`;
 		}
-		
-		if (column.fieldname == "missing_components" && value > 0 && data.missing_items_html) {
-		    value = `<a href="#" onclick="frappe.msgprint({title: __('Missing Components'), message: \`${data.missing_items_html}\`}); return false;" style="color: blue; text-decoration: underline;">${value}</a>`;
+		if (column.fieldname == "missing_components" && value > 0 && data.missing_items_json) {
+            let encoded_json = encodeURIComponent(data.missing_items_json);
+            value = `<a href="#" onclick="window.show_missing_items_dialog('${encoded_json}'); return false;" style="color: blue; text-decoration: underline;">${value}</a>`;
 		}
 		return value;
 	}
+};
+
+window.show_missing_items_dialog = function(encoded_json) {
+    let items = JSON.parse(decodeURIComponent(encoded_json));
+    let html = "<table class='table table-bordered'><thead><tr><th>Item Code</th><th>Item Name</th><th>Shortage Qty</th></tr></thead><tbody>";
+    let csv = "Item Code,Item Name,Shortage Qty\n";
+    
+    items.forEach(item => {
+        html += `<tr><td>${item.item_code}</td><td>${item.item_name}</td><td>${item.shortage}</td></tr>`;
+        let esc_name = (item.item_name || "").toString().replace(/"/g, '""');
+        csv += `"${item.item_code}","${esc_name}","${item.shortage}"\n`;
+    });
+    html += "</tbody></table>";
+    
+    let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    let url = URL.createObjectURL(blob);
+    
+    let download_btn = `<div style="margin-top: 15px;"><a href="${url}" download="missing_components.csv" class="btn btn-primary btn-sm">Download as Excel (CSV)</a></div>`;
+    
+    frappe.msgprint({
+        title: __('Missing Components'),
+        message: html + download_btn,
+        wide: true
+    });
 };

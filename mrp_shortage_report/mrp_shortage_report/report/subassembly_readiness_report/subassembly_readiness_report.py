@@ -21,7 +21,7 @@ def get_columns():
         {"fieldname": "required_qty", "label": _("Required Qty"), "fieldtype": "Float", "width": 120},
         {"fieldname": "shortage", "label": _("Shortage"), "fieldtype": "Float", "width": 120},
         {"fieldname": "missing_components", "label": _("Missing Components"), "fieldtype": "Data", "width": 150},
-        {"fieldname": "missing_items_html", "label": _("Missing Items HTML"), "fieldtype": "Data", "hidden": 1},
+        {"fieldname": "missing_items_json", "label": _("Missing Items JSON"), "fieldtype": "Data", "hidden": 1},
         {"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 150}
     ]
 
@@ -82,9 +82,9 @@ def get_data(filters):
         stock_qty = get_stock_qty(b.item_code)
         shortage = max(0, required_qty - stock_qty)
         
+        import json
         missing_count = 0
-        missing_items_html = "<table class='table table-bordered'><thead><tr><th>Item Code</th><th>Item Name</th><th>Shortage Qty</th></tr></thead><tbody>"
-        has_missing = False
+        missing_items = []
         
         bom_items = frappe.db.sql("SELECT item_code, item_name, qty FROM `tabBOM Item` WHERE parent=%s", (b.bom,), as_dict=1)
         for child in bom_items:
@@ -92,11 +92,13 @@ def get_data(filters):
             child_req = (child.qty / b.quantity) * required_qty
             if child_stock < child_req:
                 missing_count += 1
-                has_missing = True
-                missing_items_html += f"<tr><td>{child.item_code}</td><td>{child.item_name}</td><td>{child_req - child_stock}</td></tr>"
+                missing_items.append({
+                    "item_code": child.item_code,
+                    "item_name": child.item_name,
+                    "shortage": child_req - child_stock
+                })
                 
-        missing_items_html += "</tbody></table>"
-        if not has_missing: missing_items_html = ""
+        missing_items_json = json.dumps(missing_items) if missing_items else ""
                 
         status = "Completed"
         if project:
@@ -121,7 +123,7 @@ def get_data(filters):
             "required_qty": required_qty,
             "shortage": shortage,
             "missing_components": missing_count,
-            "missing_items_html": missing_items_html,
+            "missing_items_json": missing_items_json,
             "status": status
         })
         
