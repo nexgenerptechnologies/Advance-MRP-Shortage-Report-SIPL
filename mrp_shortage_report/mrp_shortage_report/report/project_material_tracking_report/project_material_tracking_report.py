@@ -54,6 +54,42 @@ def get_data(filters):
     # Apply standard item filters (Item Group, Brand, etc.)
     all_rows = apply_item_filters(all_rows, filters)
     
+    # 3. Calculate logical allocations and true shortages per row
+    stock_map = {}
+    balance_map = {}
+    for r in all_rows:
+        item = r["item_code"]
+        if item not in stock_map:
+            stock_map[item] = r["stock_qty"]
+        if item not in balance_map:
+            balance_map[item] = r["balance_qty"]
+            
+        req = r.get("project_qty", 0)
+        
+        # Allocate Stock
+        if stock_map[item] >= req:
+            r["allocated_qty"] = req
+            r["shortage_qty"] = 0
+            stock_map[item] -= req
+            r["allocation_name"] = r.get("project") or ""
+        else:
+            r["allocated_qty"] = stock_map[item]
+            r["shortage_qty"] = req - stock_map[item]
+            if stock_map[item] > 0:
+                r["allocation_name"] = r.get("project") or ""
+            else:
+                r["allocation_name"] = ""
+            stock_map[item] = 0
+            
+        # Allocate PO Balance against Shortage
+        shortage = r["shortage_qty"]
+        if balance_map[item] >= shortage:
+            r["net_shortage"] = 0
+            balance_map[item] -= shortage
+        else:
+            r["net_shortage"] = shortage - balance_map[item]
+            balance_map[item] = 0
+    
     # Apply PO Filter
     if filters.get("po_number"):
         all_rows = [r for r in all_rows if filters.get("po_number") in (r.get("po_number") or "")]
@@ -76,13 +112,13 @@ def get_data(filters):
                 grouped[item]["bom_qty"] += r.get("bom_qty", 0)
                 grouped[item]["project_qty"] += r.get("project_qty", 0)
                 grouped[item]["allocated_qty"] += r.get("allocated_qty", 0)
+                grouped[item]["shortage_qty"] += r.get("shortage_qty", 0)
+                grouped[item]["net_shortage"] += r.get("net_shortage", 0)
                 
                 if grouped[item].get("allocation_name") != r.get("allocation_name") and r.get("allocation_name"):
                     grouped[item]["allocation_name"] = "Multiple"
                     grouped[item]["project"] = "Multiple"
                     
-                grouped[item]["shortage_qty"] = max(0, grouped[item]["project_qty"] - grouped[item]["stock_qty"])
-                grouped[item]["net_shortage"] = max(0, grouped[item]["shortage_qty"] - grouped[item]["balance_qty"])
                 grouped[item]["status"] = determine_status(
                     grouped[item]["project_qty"],
                     grouped[item]["stock_qty"],
