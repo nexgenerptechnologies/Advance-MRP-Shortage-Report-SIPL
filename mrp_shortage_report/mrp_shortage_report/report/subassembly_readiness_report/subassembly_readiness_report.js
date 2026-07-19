@@ -7,17 +7,36 @@ frappe.query_reports["Subassembly Readiness Report"] = {
 			"options": "Project"
 		},
 		{
-			"fieldname": "item_code",
-			"label": __("Subassembly Item"),
+			"fieldname": "fg_bom",
+			"label": __("BOM"),
 			"fieldtype": "Link",
-			"options": "Item"
+			"options": "BOM",
+            "get_query": function() {
+                var project = frappe.query_report.get_filter_value("project");
+                return {
+                    query: "mrp_shortage_report.mrp_shortage_report.report.subassembly_readiness_report.subassembly_readiness_report.get_fg_boms",
+                    filters: { project: project }
+                };
+            }
 		},
 		{
-			"fieldname": "bom",
-			"label": __("BOM"),
+			"fieldname": "subassembly",
+			"label": __("Subassembly"),
 			"fieldtype": "MultiSelectList",
 			"get_data": function(txt) {
-				return frappe.db.get_link_options("BOM", txt);
+                var project = frappe.query_report.get_filter_value("project");
+                var fg_bom = frappe.query_report.get_filter_value("fg_bom");
+                return frappe.call({
+                    method: "mrp_shortage_report.mrp_shortage_report.report.subassembly_readiness_report.subassembly_readiness_report.get_subassembly_boms",
+                    args: {
+                        doctype: "BOM",
+                        txt: txt,
+                        searchfield: "name",
+                        start: 0,
+                        page_len: 100,
+                        filters: { project: project, fg_bom: fg_bom }
+                    }
+                }).then(r => r.message || []);
 			}
 		},
 		{
@@ -47,13 +66,14 @@ frappe.query_reports["Subassembly Readiness Report"] = {
 
 window.show_missing_items_dialog = function(encoded_json) {
     let items = JSON.parse(decodeURIComponent(encoded_json));
-    let html = "<div style='max-height: 400px; overflow-y: auto; overflow-x: hidden;'><table class='table table-bordered table-hover'><thead><tr><th>Item Code</th><th>Item Name</th><th>Shortage Qty</th></tr></thead><tbody>";
-    let csv = "Item Code,Item Name,Shortage Qty\n";
+    let html = "<div style='max-height: 400px; overflow-y: auto; overflow-x: hidden;'><table class='table table-bordered table-hover'><thead><tr><th>Item Code</th><th>Item Name</th><th>Item Group</th><th>Shortage Qty</th></tr></thead><tbody>";
+    let csv = "Item Code,Item Name,Item Group,Shortage Qty\n";
     
     items.forEach(item => {
-        html += `<tr><td>${item.item_code}</td><td>${item.item_name}</td><td>${item.shortage}</td></tr>`;
+        html += `<tr><td>${item.item_code}</td><td>${item.item_name}</td><td>${item.item_group || ""}</td><td>${item.shortage}</td></tr>`;
         let esc_name = (item.item_name || "").toString().replace(/"/g, '""');
-        csv += `"${item.item_code}","${esc_name}","${item.shortage}"\n`;
+        let esc_group = (item.item_group || "").toString().replace(/"/g, '""');
+        csv += `"${item.item_code}","${esc_name}","${esc_group}","${item.shortage}"\n`;
     });
     html += "</tbody></table></div>";
     

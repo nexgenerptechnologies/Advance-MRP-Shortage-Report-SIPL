@@ -31,25 +31,25 @@ def get_data(filters):
     conditions = ["b.docstatus = 1", "b.is_active = 1"]
     values = {}
     
-    if filters.get("project"):
+    if filters.get("subassembly"):
+        subs = filters.get("subassembly")
+        if isinstance(subs, list):
+            conditions.append("b.name IN %(subassembly)s")
+            values["subassembly"] = tuple(subs)
+        else:
+            conditions.append("b.name = %(subassembly)s")
+            values["subassembly"] = subs
+            
+    elif filters.get("fg_bom"):
+        conditions.append("(b.name = %(fg_bom)s OR b.name IN (SELECT bom_no FROM `tabBOM Item` WHERE parent = %(fg_bom)s AND bom_no IS NOT NULL))")
+        values["fg_bom"] = filters.get("fg_bom")
+        
+    elif filters.get("project"):
         if bom_project_field:
             conditions.append(f"b.{bom_project_field} = %(project)s")
         else:
             conditions.append("EXISTS (SELECT 1 FROM `tabWork Order` wo WHERE wo.bom_no = b.name AND wo.project = %(project)s)")
         values["project"] = filters.get("project")
-        
-    if filters.get("item_code"):
-        conditions.append("b.item = %(item_code)s")
-        values["item_code"] = filters.get("item_code")
-        
-    if filters.get("bom"):
-        boms = filters.get("bom")
-        if isinstance(boms, list):
-            conditions.append("b.name IN %(bom)s")
-            values["bom"] = tuple(boms)
-        else:
-            conditions.append("b.name = %(bom)s")
-            values["bom"] = boms
             
     query = f"""
         SELECT 
@@ -86,7 +86,12 @@ def get_data(filters):
         missing_count = 0
         missing_items = []
         
-        bom_items = frappe.db.sql("SELECT item_code, item_name, qty FROM `tabBOM Item` WHERE parent=%s", (b.bom,), as_dict=1)
+        bom_items = frappe.db.sql("""
+            SELECT bi.item_code, bi.item_name, bi.qty, i.item_group 
+            FROM `tabBOM Item` bi
+            LEFT JOIN `tabItem` i ON bi.item_code = i.name
+            WHERE bi.parent=%s
+        """, (b.bom,), as_dict=1)
         for child in bom_items:
             if shortage > 0:
                 child_stock = get_stock_qty(child.item_code)
@@ -96,6 +101,7 @@ def get_data(filters):
                     missing_items.append({
                         "item_code": child.item_code,
                         "item_name": child.item_name,
+                        "item_group": child.item_group,
                         "shortage": child_req - child_stock
                     })
                 
@@ -142,3 +148,26 @@ def calculate_status(shortage, missing_count, bom_no, project):
 def get_stock_qty(item_code):
     bins = frappe.db.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
     return sum([b.actual_qty for b in bins])
+
+@frappe.whitelist()
+def get_fg_boms(doctype, txt, searchfield, start, page_len, filters):
+    project = filters.get("project") if filters else None
+    conditions = ["docstatus = 1", "is_active = 1", "name NOT IN (SELECT bom_no FROM `tabBOM Item` WHERE bom_no IS NOT NULL)"]
+    if project:
+        if frappe.db.has_column("BOM", "project"):
+            conditions.append(f"project = '{project}'")
+    query = f"SELECT name, item FROM `tabBOM` WHERE {' AND '.join(conditions)} AND name LIKE %s LIMIT {start}, {page_len}"
+    return frappe.db.sql(query, (f"%{txt}%",))
+
+@frappe.whitelist()
+def get_subassembly_boms(doctype, txt, searchfield, start, page_len, filters):
+    project = filters.get("project") if filters else None
+    fg_bom = filters.get("fg_bom") if filters else None
+    conditions = ["docstatus = 1", "is_active = 1", "name IN (SELECT bom_no FROM `tabBOM Item` WHERE bom_no IS NOT NULL)"]
+    if fg_bom:
+        conditions.append(f"name IN (SELECT bom_no FROM `tabBOM Item` WHERE parent = '{fg_bom}' AND bom_no IS NOT NULL)")
+    elif project:
+        if frappe.db.has_column("BOM", "project"):
+            conditions.append(f"project = '{project}'")
+    query = f"SELECT name as value, item as description FROM `tabBOM` WHERE {' AND '.join(conditions)} AND name LIKE %s LIMIT {start}, {page_len}"
+    return frappe.db.sql(query, (f"%{txt}%",), as_dict=1)
