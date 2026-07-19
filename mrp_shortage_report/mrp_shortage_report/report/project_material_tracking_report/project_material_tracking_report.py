@@ -34,6 +34,7 @@ def get_columns():
         {"fieldname": "balance_qty", "label": _("Balance Qty"), "fieldtype": "Float", "width": 110},
         {"fieldname": "supplier", "label": _("Supplier Name"), "fieldtype": "Data", "width": 140},
         {"fieldname": "exp_delivery_date", "label": _("Exp. Delivery Date"), "fieldtype": "Data", "width": 130},
+        {"fieldname": "actual_delivery_date", "label": _("Actual Delivery Date"), "fieldtype": "Data", "width": 130},
         {"fieldname": "net_shortage", "label": _("Net Shortage"), "fieldtype": "Float", "width": 110},
         {"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 140},
     ]
@@ -165,7 +166,7 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
     shortage_qty = max(0, project_qty - stock_qty)
     
     # 2. PO Details
-    po_number, po_date, po_qty, received_qty, supplier, exp_delivery_date = get_po_details(item_code, project, wh_filter)
+    po_number, po_date, po_qty, received_qty, supplier, exp_delivery_date, actual_delivery_date = get_po_details(item_code, project, wh_filter)
     
     # 3. Calculations
     balance_qty = max(0, po_qty - received_qty)
@@ -197,6 +198,7 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
         "balance_qty": balance_qty,
         "supplier": supplier,
         "exp_delivery_date": exp_delivery_date,
+        "actual_delivery_date": actual_delivery_date,
         "net_shortage": net_shortage,
         "status": status
     }
@@ -232,17 +234,31 @@ def get_po_details(item_code, project=None, warehouse=None):
     pos = frappe.db.sql(query, values, as_dict=1)
     
     if not pos:
-        return "", "", 0.0, 0.0, "", ""
+        return "", "", 0.0, 0.0, "", "", ""
         
-    po_numbers = ", ".join(list(set([p.name for p in pos])))
+    po_names = list(set([p.name for p in pos]))
+    po_numbers = ", ".join(po_names)
     po_dates = ", ".join(list(set([str(p.transaction_date) for p in pos if p.transaction_date])))
-    suppliers = ", ".join(list(set([p.supplier for p in pos])))
+    suppliers = ", ".join(list(set([p.supplier for p in pos if p.supplier])))
     exp_dates = ", ".join(list(set([str(p.schedule_date) for p in pos if p.schedule_date])))
+    
+    actual_delivery_dates = ""
+    if po_names:
+        pr_query = f"""
+            SELECT DISTINCT pr.posting_date
+            FROM `tabPurchase Receipt Item` pri
+            INNER JOIN `tabPurchase Receipt` pr ON pri.parent = pr.name
+            WHERE pri.purchase_order IN ({', '.join(['%s']*len(po_names))})
+            AND pr.docstatus = 1
+        """
+        pr_dates = frappe.db.sql(pr_query, tuple(po_names))
+        if pr_dates:
+            actual_delivery_dates = ", ".join(list(set([str(r[0]) for r in pr_dates if r[0]])))
     
     total_po_qty = sum([p.qty for p in pos])
     total_received = sum([p.received_qty for p in pos])
     
-    return po_numbers, po_dates, total_po_qty, total_received, suppliers, exp_dates
+    return po_numbers, po_dates, total_po_qty, total_received, suppliers, exp_dates, actual_delivery_dates
 
 def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None):
     if project:
