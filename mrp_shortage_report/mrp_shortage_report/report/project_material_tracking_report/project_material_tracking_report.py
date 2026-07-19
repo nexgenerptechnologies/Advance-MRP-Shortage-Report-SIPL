@@ -194,7 +194,8 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
     shortage_qty = max(0, project_qty - stock_qty)
     
     # 2. PO Details
-    po_number, po_date, po_qty, received_qty, supplier, exp_delivery_date, actual_delivery_date = get_po_details(item_code, project, wh_filter)
+    po_filter = filters.get("po_number")
+    po_number, po_date, po_qty, received_qty, supplier, exp_delivery_date, actual_delivery_date = get_po_details(item_code, project, wh_filter, po_filter)
     
     # 3. Calculations
     balance_qty = max(0, po_qty - received_qty)
@@ -238,10 +239,14 @@ def get_stock_qty(item_code, warehouse=None):
         bins = frappe.db.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
         return sum([b.actual_qty for b in bins])
 
-def get_po_details(item_code, project=None, warehouse=None):
+def get_po_details(item_code, project=None, warehouse=None, po_number=None):
     conditions = ["poi.item_code = %(item_code)s", "po.docstatus = 1", "po.status != 'Cancelled'"]
     values = {"item_code": item_code}
     
+    if po_number:
+        conditions.append("po.name = %(po_number)s")
+        values["po_number"] = po_number
+        
     if project:
         # Standard ERPNext has project on PO item
         conditions.append("poi.project = %(project)s")
