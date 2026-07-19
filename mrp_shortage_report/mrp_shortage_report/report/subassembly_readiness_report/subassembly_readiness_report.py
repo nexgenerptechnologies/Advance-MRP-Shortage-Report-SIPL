@@ -151,6 +151,10 @@ def get_stock_qty(item_code):
 
 @frappe.whitelist()
 def get_fg_boms(doctype, txt, searchfield, start, page_len, filters):
+    if isinstance(filters, str):
+        import json
+        filters = json.loads(filters)
+        
     project = filters.get("project") if filters else None
     conditions = ["docstatus = 1", "is_active = 1", "name NOT IN (SELECT bom_no FROM `tabBOM Item` WHERE bom_no IS NOT NULL)"]
     if project:
@@ -161,6 +165,10 @@ def get_fg_boms(doctype, txt, searchfield, start, page_len, filters):
 
 @frappe.whitelist()
 def get_subassembly_boms(doctype, txt, searchfield, start, page_len, filters):
+    if isinstance(filters, str):
+        import json
+        filters = json.loads(filters)
+        
     project = filters.get("project") if filters else None
     fg_bom = filters.get("fg_bom") if filters else None
     conditions = ["docstatus = 1", "is_active = 1", "name IN (SELECT bom_no FROM `tabBOM Item` WHERE bom_no IS NOT NULL)"]
