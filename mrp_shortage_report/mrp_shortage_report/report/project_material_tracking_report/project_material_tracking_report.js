@@ -21,6 +21,18 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			}
 		},
 		{
+			"fieldname": "group_by_item",
+			"label": __("Group by Item Code"),
+			"fieldtype": "Check",
+			"default": 0
+		},
+		{
+			"fieldname": "po_number",
+			"label": __("Purchase Order"),
+			"fieldtype": "Link",
+			"options": "Purchase Order"
+		},
+		{
 			"fieldname": "brand",
 			"label": __("Brand"),
 			"fieldtype": "Link",

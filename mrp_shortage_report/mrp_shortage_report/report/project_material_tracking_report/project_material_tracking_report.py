@@ -54,9 +54,37 @@ def get_data(filters):
     # Apply standard item filters (Item Group, Brand, etc.)
     all_rows = apply_item_filters(all_rows, filters)
     
+    # Apply PO Filter
+    if filters.get("po_number"):
+        all_rows = [r for r in all_rows if filters.get("po_number") in (r.get("po_number") or "")]
+
     # Apply Status Filter
     if filters.get("status"):
         all_rows = [r for r in all_rows if r.get("status") == filters.get("status")]
+        
+    # Apply Group By
+    if filters.get("group_by_item") or filters.get("po_number"):
+        grouped = {}
+        for r in all_rows:
+            item = r.get("item_code")
+            if item not in grouped:
+                grouped[item] = r.copy()
+                grouped[item]["bom"] = "Multiple"
+                grouped[item]["bom_date"] = None
+                grouped[item]["bom_modified"] = None
+            else:
+                grouped[item]["bom_qty"] += r.get("bom_qty", 0)
+                grouped[item]["project_qty"] += r.get("project_qty", 0)
+                grouped[item]["shortage_qty"] = max(0, grouped[item]["project_qty"] - grouped[item]["stock_qty"])
+                grouped[item]["net_shortage"] = max(0, grouped[item]["shortage_qty"] - grouped[item]["balance_qty"])
+                grouped[item]["status"] = determine_status(
+                    grouped[item]["project_qty"],
+                    grouped[item]["stock_qty"],
+                    grouped[item]["po_qty"],
+                    grouped[item]["received_qty"],
+                    grouped[item].get("project")
+                )
+        all_rows = list(grouped.values())
         
     return all_rows
 
@@ -249,9 +277,10 @@ def get_po_details(item_code, project=None, warehouse=None):
             FROM `tabPurchase Receipt Item` pri
             INNER JOIN `tabPurchase Receipt` pr ON pri.parent = pr.name
             WHERE pri.purchase_order IN ({', '.join(['%s']*len(po_names))})
+            AND pri.item_code = %s
             AND pr.docstatus = 1
         """
-        pr_dates = frappe.db.sql(pr_query, tuple(po_names))
+        pr_dates = frappe.db.sql(pr_query, tuple(po_names) + (item_code,))
         if pr_dates:
             actual_delivery_dates = ", ".join(list(set([str(r[0]) for r in pr_dates if r[0]])))
     
