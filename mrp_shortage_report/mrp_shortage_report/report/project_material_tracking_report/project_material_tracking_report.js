@@ -51,12 +51,6 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"options": "Supplier"
 		},
 		{
-			"fieldname": "purchase_order",
-			"label": __("Purchase Order"),
-			"fieldtype": "Link",
-			"options": "Purchase Order"
-		},
-		{
 			"fieldname": "status",
 			"label": __("Status"),
 			"fieldtype": "Select",

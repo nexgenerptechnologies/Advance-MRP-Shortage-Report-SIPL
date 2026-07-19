@@ -75,6 +75,12 @@ def get_data(filters):
             else:
                 grouped[item]["bom_qty"] += r.get("bom_qty", 0)
                 grouped[item]["project_qty"] += r.get("project_qty", 0)
+                grouped[item]["allocated_qty"] += r.get("allocated_qty", 0)
+                
+                if grouped[item].get("allocation_name") != r.get("allocation_name") and r.get("allocation_name"):
+                    grouped[item]["allocation_name"] = "Multiple"
+                    grouped[item]["project"] = "Multiple"
+                    
                 grouped[item]["shortage_qty"] = max(0, grouped[item]["project_qty"] - grouped[item]["stock_qty"])
                 grouped[item]["net_shortage"] = max(0, grouped[item]["shortage_qty"] - grouped[item]["balance_qty"])
                 grouped[item]["status"] = determine_status(
