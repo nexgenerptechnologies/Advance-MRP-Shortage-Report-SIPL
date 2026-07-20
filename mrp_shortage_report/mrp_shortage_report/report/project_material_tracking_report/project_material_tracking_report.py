@@ -124,7 +124,8 @@ def get_data(filters):
                     grouped[item]["stock_qty"],
                     grouped[item]["po_qty"],
                     grouped[item]["received_qty"],
-                    grouped[item].get("project")
+                    grouped[item].get("project"),
+                    item
                 )
         all_rows = list(grouped.values())
         
@@ -244,7 +245,7 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
     net_shortage = max(0, shortage_qty - balance_qty)
     
     # 4. Status Determination
-    status = determine_status(project_qty, stock_qty, po_qty, received_qty, project)
+    status = determine_status(project_qty, stock_qty, po_qty, received_qty, project, item_code)
     
     return {
         "project": project,
@@ -336,12 +337,26 @@ def get_po_details(item_code, project=None, warehouse=None, po_number=None):
     
     return po_numbers, po_dates, total_po_qty, total_received, suppliers, exp_dates, actual_delivery_dates
 
-def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None):
+def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None, item_code=None):
     if project:
         is_project_completed = frappe.db.get_value("Project", project, "status") == "Completed"
         has_invoice = frappe.db.exists("Sales Invoice", {"project": project, "docstatus": 1})
         if is_project_completed or has_invoice:
             return "Project Completed"
+            
+        if item_code:
+            in_production = frappe.db.sql("""
+                SELECT 1 
+                FROM `tabStock Entry Detail` sed
+                INNER JOIN `tabStock Entry` se ON sed.parent = se.name
+                WHERE se.docstatus = 1 
+                  AND se.purpose IN ('Material Transfer for Manufacture', 'Material Transfer')
+                  AND se.project = %s
+                  AND sed.item_code = %s
+                LIMIT 1
+            """, (project, item_code))
+            if in_production:
+                return "In Production"
             
     if req_qty > 0 and stock_qty >= req_qty:
         return "In Stock"
