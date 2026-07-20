@@ -345,20 +345,128 @@ def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None):
             
     if req_qty > 0 and stock_qty >= req_qty:
         return "In Stock"
-    
-    if po_qty == 0:
-        return "Pending PO"
-        
-    if po_qty > 0 and received_qty == 0:
+    if received_qty >= (req_qty - stock_qty) and received_qty > 0:
+        return "Fully Received"
+    if received_qty > 0:
+        return "Partially Received"
+    if po_qty > 0:
         return "PO Raised"
         
-    if received_qty > 0 and received_qty < po_qty:
-        return "Partially Received"
+    return "Pending PO"
+
+@frappe.whitelist()
+def get_dynamic_bom_options(project=None, txt=None):
+    conditions = ["docstatus = 1", "is_active = 1"]
+    values = {}
+    
+    if txt:
+        conditions.append("name LIKE %(txt)s")
+        values["txt"] = f"%{txt}%"
         
-    if received_qty >= po_qty and received_qty > 0:
-        return "Fully Received"
+    if project:
+        bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
+        if bom_project_field:
+            conditions.append(f"{bom_project_field} = %(project)s")
+            values["project"] = project
+            
+    boms = frappe.db.sql(f"SELECT name as value, name as description FROM `tabBOM` WHERE {' AND '.join(conditions)} LIMIT 50", values, as_dict=1)
+    return boms
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters):
+    filter_type = filters.get("filter_type")
+    project = filters.get("project")
+    bom_filter = filters.get("bom")
+    
+    boms = []
+    if bom_filter:
+        import json
+        try:
+            boms = json.loads(bom_filter)
+        except:
+            boms = [bom_filter]
+            
+    # Fallback to standard
+    if not project and not boms:
+        return frappe.db.sql(f"SELECT name FROM `tab{doctype}` WHERE name LIKE %s LIMIT %s OFFSET %s", (f"%{txt}%", page_len, start))
         
-    return "Pending"
+    txt_cond = f"AND name LIKE '%%{frappe.db.escape(txt)}%%'" if txt else ""
+    
+    bom_cond = "1=1"
+    params = ()
+    if boms:
+        bom_cond = f"parent IN ({', '.join(['%s']*len(boms))})"
+        params = tuple(boms)
+    elif project:
+        bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
+        if bom_project_field:
+            bom_cond = f"parent IN (SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1)"
+            params = (project,)
+            
+    if filter_type == "Item":
+        query = f"""
+            SELECT DISTINCT item_code 
+            FROM `tabBOM Item` 
+            WHERE {bom_cond} AND item_code LIKE %s
+            LIMIT %s OFFSET %s
+        """
+        return frappe.db.sql(query, params + (f"%{txt}%", page_len, start))
+        
+    elif filter_type == "Purchase Order":
+        proj_cond = "AND poi.project = %s" if project else ""
+        query = f"""
+            SELECT DISTINCT po.name 
+            FROM `tabPurchase Order` po
+            INNER JOIN `tabPurchase Order Item` poi ON poi.parent = po.name
+            WHERE po.docstatus = 1 {proj_cond} {txt_cond}
+            LIMIT %s OFFSET %s
+        """
+        return frappe.db.sql(query, (project, page_len, start) if project else (page_len, start))
+        
+    elif filter_type == "Supplier":
+        proj_cond = "AND poi.project = %s" if project else ""
+        query = f"""
+            SELECT DISTINCT po.supplier 
+            FROM `tabPurchase Order` po
+            INNER JOIN `tabPurchase Order Item` poi ON poi.parent = po.name
+            WHERE po.docstatus = 1 {proj_cond} AND po.supplier LIKE %s
+            LIMIT %s OFFSET %s
+        """
+        return frappe.db.sql(query, (project, f"%{txt}%", page_len, start) if project else (f"%{txt}%", page_len, start))
+        
+    elif filter_type == "Brand":
+        query = f"""
+            SELECT DISTINCT i.brand 
+            FROM `tabBOM Item` bi
+            INNER JOIN `tabItem` i ON bi.item_code = i.name
+            WHERE {bom_cond} AND i.brand IS NOT NULL AND i.brand LIKE %s
+            LIMIT %s OFFSET %s
+        """
+        return frappe.db.sql(query, params + (f"%{txt}%", page_len, start))
+        
+    elif filter_type == "Item Group":
+        query = f"""
+            SELECT DISTINCT i.item_group 
+            FROM `tabBOM Item` bi
+            INNER JOIN `tabItem` i ON bi.item_code = i.name
+            WHERE {bom_cond} AND i.item_group IS NOT NULL AND i.item_group LIKE %s
+            LIMIT %s OFFSET %s
+        """
+        return frappe.db.sql(query, params + (f"%{txt}%", page_len, start))
+        
+    elif filter_type == "Warehouse":
+        proj_cond = "AND poi.project = %s" if project else ""
+        query = f"""
+            SELECT DISTINCT poi.warehouse 
+            FROM `tabPurchase Order Item` poi
+            INNER JOIN `tabPurchase Order` po ON poi.parent = po.name
+            WHERE po.docstatus = 1 {proj_cond} AND poi.warehouse LIKE %s
+            LIMIT %s OFFSET %s
+        """
+        return frappe.db.sql(query, (project, f"%{txt}%", page_len, start) if project else (f"%{txt}%", page_len, start))
+        
+    return frappe.db.sql(f"SELECT name FROM `tab{doctype}` WHERE name LIKE %s LIMIT %s OFFSET %s", (f"%{txt}%", page_len, start))
 
 def apply_item_filters(rows, filters):
     if not filters:

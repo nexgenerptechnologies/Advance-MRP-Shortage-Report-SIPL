@@ -1,12 +1,6 @@
 frappe.query_reports["Project Material Tracking Report"] = {
 	"filters": [
 		{
-			"fieldname": "item_code",
-			"label": __("Item"),
-			"fieldtype": "Link",
-			"options": "Item"
-		},
-		{
 			"fieldname": "project",
 			"label": __("Project"),
 			"fieldtype": "Link",
@@ -17,7 +11,14 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("BOM"),
 			"fieldtype": "MultiSelectList",
 			"get_data": function(txt) {
-				return frappe.db.get_link_options("BOM", txt);
+				let project = frappe.query_report.get_filter_value('project');
+				return frappe.call({
+					method: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_bom_options",
+					args: {
+						project: project,
+						txt: txt
+					}
+				}).then(r => r.message || []);
 			}
 		},
 		{
@@ -27,28 +28,82 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"default": 0
 		},
 		{
+			"fieldname": "item_code",
+			"label": __("Item Code"),
+			"fieldtype": "Link",
+			"options": "Item",
+			"get_query": function() {
+				return {
+					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
+					filters: {
+						"filter_type": "Item",
+						"project": frappe.query_report.get_filter_value('project'),
+						"bom": JSON.stringify(frappe.query_report.get_filter_value('bom') || [])
+					}
+				};
+			}
+		},
+		{
 			"fieldname": "po_number",
 			"label": __("Purchase Order"),
 			"fieldtype": "Link",
-			"options": "Purchase Order"
+			"options": "Purchase Order",
+			"get_query": function() {
+				return {
+					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
+					filters: {
+						"filter_type": "Purchase Order",
+						"project": frappe.query_report.get_filter_value('project')
+					}
+				};
+			}
 		},
 		{
 			"fieldname": "brand",
 			"label": __("Brand"),
 			"fieldtype": "Link",
-			"options": "Brand"
+			"options": "Brand",
+			"get_query": function() {
+				return {
+					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
+					filters: {
+						"filter_type": "Brand",
+						"project": frappe.query_report.get_filter_value('project'),
+						"bom": JSON.stringify(frappe.query_report.get_filter_value('bom') || [])
+					}
+				};
+			}
 		},
 		{
 			"fieldname": "item_group",
 			"label": __("Item Group"),
 			"fieldtype": "Link",
-			"options": "Item Group"
+			"options": "Item Group",
+			"get_query": function() {
+				return {
+					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
+					filters: {
+						"filter_type": "Item Group",
+						"project": frappe.query_report.get_filter_value('project'),
+						"bom": JSON.stringify(frappe.query_report.get_filter_value('bom') || [])
+					}
+				};
+			}
 		},
 		{
 			"fieldname": "supplier",
 			"label": __("Supplier"),
 			"fieldtype": "Link",
-			"options": "Supplier"
+			"options": "Supplier",
+			"get_query": function() {
+				return {
+					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
+					filters: {
+						"filter_type": "Supplier",
+						"project": frappe.query_report.get_filter_value('project')
+					}
+				};
+			}
 		},
 		{
 			"fieldname": "status",
@@ -60,7 +115,16 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"fieldname": "warehouse",
 			"label": __("Warehouse"),
 			"fieldtype": "Link",
-			"options": "Warehouse"
+			"options": "Warehouse",
+			"get_query": function() {
+				return {
+					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
+					filters: {
+						"filter_type": "Warehouse",
+						"project": frappe.query_report.get_filter_value('project')
+					}
+				};
+			}
 		}
 	],
 	"formatter": function(value, row, column, data, default_formatter) {
