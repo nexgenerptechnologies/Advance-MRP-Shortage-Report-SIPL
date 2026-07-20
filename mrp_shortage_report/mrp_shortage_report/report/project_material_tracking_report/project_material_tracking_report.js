@@ -10,6 +10,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"fieldname": "bom",
 			"label": __("BOM"),
 			"fieldtype": "MultiSelectList",
+			"depends_on": "eval:doc.project",
 			"get_data": function(txt) {
 				let project = frappe.query_report.get_filter_value('project');
 				return frappe.call({
@@ -32,6 +33,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("Item Code"),
 			"fieldtype": "Link",
 			"options": "Item",
+			"depends_on": "eval:doc.project",
 			"get_query": function() {
 				return {
 					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
@@ -48,6 +50,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("Purchase Order"),
 			"fieldtype": "Link",
 			"options": "Purchase Order",
+			"depends_on": "eval:doc.project",
 			"get_query": function() {
 				return {
 					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
@@ -63,6 +66,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("Brand"),
 			"fieldtype": "Link",
 			"options": "Brand",
+			"depends_on": "eval:doc.project",
 			"get_query": function() {
 				return {
 					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
@@ -79,6 +83,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("Item Group"),
 			"fieldtype": "Link",
 			"options": "Item Group",
+			"depends_on": "eval:doc.project",
 			"get_query": function() {
 				return {
 					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
@@ -95,6 +100,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("Supplier"),
 			"fieldtype": "Link",
 			"options": "Supplier",
+			"depends_on": "eval:doc.project",
 			"get_query": function() {
 				return {
 					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
@@ -109,6 +115,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"fieldname": "status",
 			"label": __("Status"),
 			"fieldtype": "Select",
+			"depends_on": "eval:doc.project",
 			"options": "\nPending PO\nPO Raised\nPartially Received\nFully Received\nIn Stock\nProject Completed\nIn Production"
 		},
 		{
@@ -116,6 +123,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			"label": __("Warehouse"),
 			"fieldtype": "Link",
 			"options": "Warehouse",
+			"depends_on": "eval:doc.project",
 			"get_query": function() {
 				return {
 					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
