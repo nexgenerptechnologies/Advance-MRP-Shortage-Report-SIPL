@@ -139,7 +139,7 @@ def fetch_demand(filters):
     # Identify how Project Links to BOM. Using similar logic to advanced report
     bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
     
-    conditions = ["docstatus = 1", "is_active = 1"]
+    conditions = ["docstatus = 1", "is_active = 1", "is_default = 1"]
     values = {}
     
     if filters.get("project") and bom_project_field:
@@ -415,7 +415,7 @@ def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None, ite
 
 @frappe.whitelist()
 def get_dynamic_bom_options(project=None, txt=None):
-    conditions = ["docstatus = 1", "is_active = 1"]
+    conditions = ["docstatus = 1", "is_active = 1", "is_default = 1"]
     values = {}
     
     if txt:
