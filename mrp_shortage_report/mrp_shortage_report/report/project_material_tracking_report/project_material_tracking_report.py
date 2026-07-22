@@ -48,8 +48,11 @@ def get_data(filters):
     # 2. Fetch Factory Stock (Items in Warehouse not covered by BOM/Project)
     factory_data = fetch_factory_stock(filters, demand_data)
     
+    # 2.5 Fetch items linked to Project via PO or MR (if no BOM exists)
+    extra_data = fetch_extra_project_items(filters, demand_data + factory_data)
+    
     # Combine
-    all_rows = demand_data + factory_data
+    all_rows = demand_data + factory_data + extra_data
     
     # Apply standard item filters (Item Group, Brand, etc.)
     all_rows = apply_item_filters(all_rows, filters)
@@ -178,6 +181,47 @@ def fetch_demand(filters):
             if row:
                 rows.append(row)
                 processed_nodes.add((bom.project, comp.item_code))
+                
+    return rows
+
+def fetch_extra_project_items(filters, existing_data):
+    rows = []
+    project = filters.get("project")
+    if not project:
+        return rows
+        
+    existing_items = set([r.get("item_code") for r in existing_data])
+    
+    # Find items on Purchase Orders or Material Requests for this project
+    po_items = frappe.db.sql("""
+        SELECT DISTINCT item_code 
+        FROM `tabPurchase Order Item`
+        WHERE project = %s AND docstatus = 1
+    """, (project,), as_dict=1)
+    
+    mr_items = frappe.db.sql("""
+        SELECT DISTINCT item_code 
+        FROM `tabMaterial Request Item`
+        WHERE project = %s AND docstatus = 1
+    """, (project,), as_dict=1)
+    
+    all_extra = [pi.item_code for pi in po_items] + [mi.item_code for mi in mr_items]
+    
+    for item_code in set(all_extra):
+        if item_code not in existing_items:
+            row = build_row(
+                item_code=item_code,
+                project=project,
+                bom_name=None,
+                bom_date=None,
+                bom_modified=None,
+                bom_qty=0,
+                project_qty=0,
+                filters=filters
+            )
+            if row:
+                rows.append(row)
+                existing_items.add(item_code)
                 
     return rows
 
