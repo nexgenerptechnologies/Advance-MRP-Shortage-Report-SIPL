@@ -434,10 +434,10 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
             SELECT DISTINCT po.name 
             FROM `tabPurchase Order` po
             INNER JOIN `tabPurchase Order Item` poi ON poi.parent = po.name
-            WHERE po.docstatus = 1 {proj_cond} {txt_cond}
+            WHERE po.docstatus = 1 {proj_cond} AND po.name LIKE %s
             LIMIT %s OFFSET %s
         """
-        return frappe.db.sql(query, (project, page_len, start) if project else (page_len, start))
+        return frappe.db.sql(query, (project, f"%{txt}%", page_len, start) if project else (f"%{txt}%", page_len, start))
         
     elif filter_type == "Supplier":
         proj_cond = "AND poi.project = %s" if project else ""
