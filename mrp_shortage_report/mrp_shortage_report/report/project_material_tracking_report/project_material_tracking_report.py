@@ -147,7 +147,8 @@ def fetch_demand(filters):
     values = {}
     
     if filters.get("project") and bom_project_field:
-        conditions.append(f"{bom_project_field} = %(project)s")
+        if not filters.get("bom"):
+            conditions.append(f"{bom_project_field} = %(project)s")
         values["project"] = filters.get("project")
     if filters.get("bom"):
         boms = filters.get("bom")
@@ -207,7 +208,8 @@ def fetch_demand(filters):
 
     for bom in boms:
         # Start the recursive fetch. Parent assembly is the top-level BOM item.
-        get_bom_components(bom.name, bom.project, bom.name, bom.item, multiplier=1.0)
+        project_val = filters.get("project") or bom.project
+        get_bom_components(bom.name, project_val, bom.name, bom.item, multiplier=1.0)
                 
     return rows
 
