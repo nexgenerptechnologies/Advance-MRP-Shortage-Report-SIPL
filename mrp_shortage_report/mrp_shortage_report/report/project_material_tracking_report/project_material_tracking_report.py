@@ -192,20 +192,14 @@ def fetch_extra_project_items(filters, existing_data):
         
     existing_items = set([r.get("item_code") for r in existing_data])
     
-    # Find items on Purchase Orders or Material Requests for this project
+    # Find items on Purchase Orders for this project
     po_items = frappe.db.sql("""
         SELECT DISTINCT item_code 
         FROM `tabPurchase Order Item`
         WHERE project = %s AND docstatus = 1
     """, (project,), as_dict=1)
     
-    mr_items = frappe.db.sql("""
-        SELECT DISTINCT item_code 
-        FROM `tabMaterial Request Item`
-        WHERE project = %s AND docstatus = 1
-    """, (project,), as_dict=1)
-    
-    all_extra = [pi.item_code for pi in po_items] + [mi.item_code for mi in mr_items]
+    all_extra = [pi.item_code for pi in po_items]
     
     for item_code in set(all_extra):
         if item_code not in existing_items:
