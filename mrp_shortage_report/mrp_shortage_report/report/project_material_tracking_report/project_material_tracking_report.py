@@ -14,6 +14,7 @@ def get_columns():
     return [
         {"fieldname": "project", "label": _("Project"), "fieldtype": "Link", "options": "Project", "width": 140},
         {"fieldname": "bom", "label": _("BOM"), "fieldtype": "Link", "options": "BOM", "width": 140},
+        {"fieldname": "parent_assembly", "label": _("Parent Assembly"), "fieldtype": "Link", "options": "Item", "width": 140},
         {"fieldname": "bom_date", "label": _("BOM Upload Date"), "fieldtype": "Date", "width": 120},
         {"fieldname": "bom_modified", "label": _("BOM Last Modified Date"), "fieldtype": "Date", "width": 140},
         {"fieldname": "item_code", "label": _("Item Code"), "fieldtype": "Link", "options": "Item", "width": 140},
@@ -118,6 +119,9 @@ def get_data(filters):
                 grouped[item]["shortage_qty"] += r.get("shortage_qty", 0)
                 grouped[item]["net_shortage"] += r.get("net_shortage", 0)
                 
+                if grouped[item].get("parent_assembly") != r.get("parent_assembly") and r.get("parent_assembly"):
+                    grouped[item]["parent_assembly"] = "Multiple"
+
                 if grouped[item].get("allocation_name") != r.get("allocation_name") and r.get("allocation_name"):
                     grouped[item]["allocation_name"] = "Multiple"
                     grouped[item]["project"] = "Multiple"
@@ -159,28 +163,42 @@ def fetch_demand(filters):
     
     processed_nodes = set()
     
-    for bom in boms:
-        # Explode BOM to get components
+    def get_bom_components(bom_name, project_value, top_level_bom, parent_assembly, multiplier=1.0):
         components = frappe.db.sql("""
             SELECT item_code, item_name, description, qty as bom_qty, qty as req_qty
             FROM `tabBOM Item`
             WHERE parent = %s
-        """, bom.name, as_dict=1)
+        """, bom_name, as_dict=1)
+        
+        bom_info = frappe.db.get_value("BOM", bom_name, ["creation", "modified", "quantity"], as_dict=1)
+        if not bom_info: return
         
         for comp in components:
+            actual_req_qty = float(comp.req_qty) * multiplier
             row = build_row(
                 item_code=comp.item_code,
-                project=bom.project,
-                bom_name=bom.name,
-                bom_date=bom.creation,
-                bom_modified=bom.modified,
+                project=project_value,
+                bom_name=top_level_bom,
+                bom_date=bom_info.creation,
+                bom_modified=bom_info.modified,
                 bom_qty=comp.bom_qty,
-                project_qty=comp.req_qty, # Base required qty
-                filters=filters
+                project_qty=actual_req_qty,
+                filters=filters,
+                parent_assembly=parent_assembly
             )
             if row:
                 rows.append(row)
-                processed_nodes.add((bom.project, comp.item_code))
+                processed_nodes.add((project_value, comp.item_code))
+                
+            child_bom = frappe.db.get_value("BOM", {"item": comp.item_code, "is_default": 1, "is_active": 1, "docstatus": 1})
+            if child_bom:
+                child_bom_qty = frappe.db.get_value("BOM", child_bom, "quantity") or 1.0
+                new_multiplier = actual_req_qty / float(child_bom_qty)
+                get_bom_components(child_bom, project_value, top_level_bom, comp.item_code, new_multiplier)
+
+    for bom in boms:
+        # Start the recursive fetch. Parent assembly is the top-level BOM item.
+        get_bom_components(bom.name, bom.project, bom.name, bom.item, multiplier=1.0)
                 
     return rows
 
@@ -211,7 +229,8 @@ def fetch_extra_project_items(filters, existing_data):
                 bom_modified=None,
                 bom_qty=0,
                 project_qty=0,
-                filters=filters
+                filters=filters,
+                parent_assembly=None
             )
             if row:
                 rows.append(row)
@@ -262,7 +281,7 @@ def fetch_factory_stock(filters, demand_data):
                 
     return rows
 
-def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, project_qty, filters):
+def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, project_qty, filters, parent_assembly=None):
     if filters.get("item_code") and item_code != filters.get("item_code"):
         return None
         
@@ -288,6 +307,7 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
     return {
         "project": project,
         "bom": bom_name,
+        "parent_assembly": parent_assembly,
         "bom_date": bom_date.date() if bom_date else None,
         "bom_modified": bom_modified.date() if bom_modified else None,
         "item_code": item_code,
@@ -419,8 +439,25 @@ def get_dynamic_bom_options(project=None, txt=None):
     if project:
         bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
         if bom_project_field:
-            conditions.append(f"{bom_project_field} = %(project)s")
-            values["project"] = project
+            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1 AND is_active=1 AND is_default=1", (project,))
+            valid_boms = set()
+            
+            def get_child_boms(bom_name):
+                valid_boms.add(bom_name)
+                items = frappe.db.sql("SELECT item_code FROM `tabBOM Item` WHERE parent = %s", (bom_name,))
+                for item in items:
+                    child_bom = frappe.db.get_value("BOM", {"item": item[0], "is_default": 1, "is_active": 1, "docstatus": 1})
+                    if child_bom and child_bom not in valid_boms:
+                        get_child_boms(child_bom)
+                        
+            for b in top_boms:
+                get_child_boms(b[0])
+                
+            if valid_boms:
+                conditions.append("name IN %(valid_boms)s")
+                values["valid_boms"] = tuple(valid_boms)
+            else:
+                return []
             
     boms = frappe.db.sql(f"SELECT name as value, name as description FROM `tabBOM` WHERE {' AND '.join(conditions)} LIMIT 50", values, as_dict=1)
     return boms
@@ -454,8 +491,26 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
     elif project:
         bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
         if bom_project_field:
-            bom_cond = f"parent IN (SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1)"
-            params = (project,)
+            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1 AND is_active=1 AND is_default=1", (project,))
+            valid_boms = set()
+            
+            def get_child_boms(bom_name):
+                valid_boms.add(bom_name)
+                items = frappe.db.sql("SELECT item_code FROM `tabBOM Item` WHERE parent = %s", (bom_name,))
+                for item in items:
+                    child_bom = frappe.db.get_value("BOM", {"item": item[0], "is_default": 1, "is_active": 1, "docstatus": 1})
+                    if child_bom and child_bom not in valid_boms:
+                        get_child_boms(child_bom)
+                        
+            for b in top_boms:
+                get_child_boms(b[0])
+                
+            if valid_boms:
+                bom_cond = f"parent IN ({', '.join(['%s']*len(valid_boms))})"
+                params = tuple(valid_boms)
+            else:
+                bom_cond = "1=0"
+                params = ()
             
     if filter_type == "Item":
         query = f"""
