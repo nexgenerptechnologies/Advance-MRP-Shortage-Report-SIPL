@@ -14,7 +14,7 @@ def get_columns():
     return [
         {"fieldname": "project", "label": _("Project"), "fieldtype": "Link", "options": "Project", "width": 140},
         {"fieldname": "bom", "label": _("BOM"), "fieldtype": "Link", "options": "BOM", "width": 140},
-        {"fieldname": "parent_assembly", "label": _("Parent Assembly"), "fieldtype": "Link", "options": "Item", "width": 140},
+        {"fieldname": "parent_assembly", "label": _("Subassembly BOM"), "fieldtype": "Link", "options": "BOM", "width": 140},
         {"fieldname": "bom_date", "label": _("BOM Upload Date"), "fieldtype": "Date", "width": 120},
         {"fieldname": "bom_modified", "label": _("BOM Last Modified Date"), "fieldtype": "Date", "width": 140},
         {"fieldname": "item_code", "label": _("Item Code"), "fieldtype": "Link", "options": "Item", "width": 140},
@@ -193,7 +193,7 @@ def fetch_demand(filters):
                 bom_qty=comp.bom_qty,
                 project_qty=actual_req_qty,
                 filters=filters,
-                parent_assembly=parent_assembly
+                parent_assembly=bom_name
             )
             if row:
                 rows.append(row)
