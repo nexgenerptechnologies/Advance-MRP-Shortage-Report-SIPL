@@ -163,7 +163,16 @@ def fetch_demand(filters):
     
     processed_nodes = set()
     
-    def get_bom_components(bom_name, project_value, top_level_bom, parent_assembly, multiplier=1.0):
+    def get_bom_components(bom_name, project_value, top_level_bom, parent_assembly, multiplier=1.0, visited_boms=None):
+        if visited_boms is None:
+            visited_boms = set()
+            
+        if bom_name in visited_boms:
+            return
+            
+        visited_boms = visited_boms.copy()
+        visited_boms.add(bom_name)
+        
         components = frappe.db.sql("""
             SELECT item_code, item_name, description, qty as bom_qty, qty as req_qty
             FROM `tabBOM Item`
@@ -194,7 +203,7 @@ def fetch_demand(filters):
             if child_bom:
                 child_bom_qty = frappe.db.get_value("BOM", child_bom, "quantity") or 1.0
                 new_multiplier = actual_req_qty / float(child_bom_qty)
-                get_bom_components(child_bom, project_value, top_level_bom, comp.item_code, new_multiplier)
+                get_bom_components(child_bom, project_value, top_level_bom, comp.item_code, new_multiplier, visited_boms)
 
     for bom in boms:
         # Start the recursive fetch. Parent assembly is the top-level BOM item.
