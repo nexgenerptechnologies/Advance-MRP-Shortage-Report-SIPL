@@ -47,10 +47,13 @@ def get_data(filters):
     demand_data = fetch_demand(filters)
     
     # 2. Fetch Factory Stock (Items in Warehouse not covered by BOM/Project)
-    factory_data = fetch_factory_stock(filters, demand_data)
-    
     # 2.5 Fetch items linked to Project via PO or MR (if no BOM exists)
-    extra_data = fetch_extra_project_items(filters, demand_data + factory_data)
+    factory_data = []
+    extra_data = []
+    
+    if not filters.get("bom"):
+        factory_data = fetch_factory_stock(filters, demand_data)
+        extra_data = fetch_extra_project_items(filters, demand_data + factory_data)
     
     # Combine
     all_rows = demand_data + factory_data + extra_data
