@@ -317,7 +317,9 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
     
     # 4. Status Determination
     status = determine_status(project_qty, stock_qty, po_qty, received_qty, project, item_code)
-    
+    if parent_assembly == bom_name:
+        parent_assembly = ""
+        
     return {
         "project": project,
         "bom": bom_name,
