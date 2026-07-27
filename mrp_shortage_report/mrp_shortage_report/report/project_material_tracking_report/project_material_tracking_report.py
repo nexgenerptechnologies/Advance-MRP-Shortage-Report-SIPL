@@ -188,23 +188,25 @@ def fetch_demand(filters):
         
         for comp in components:
             actual_req_qty = float(comp.req_qty) * multiplier
-            row = build_row(
-                item_code=comp.item_code,
-                project=project_value,
-                bom_name=top_level_bom,
-                bom_date=bom_info.creation,
-                bom_modified=bom_info.modified,
-                bom_qty=comp.bom_qty,
-                project_qty=actual_req_qty,
-                filters=filters,
-                parent_assembly=bom_name
-            )
-            if row:
-                rows.append(row)
-                processed_nodes.add((project_value, comp.item_code))
-                
+            
             child_bom = frappe.db.get_value("BOM", {"item": comp.item_code, "is_default": 1, "is_active": 1, "docstatus": 1})
-            if child_bom:
+            
+            if not child_bom:
+                row = build_row(
+                    item_code=comp.item_code,
+                    project=project_value,
+                    bom_name=top_level_bom,
+                    bom_date=bom_info.creation,
+                    bom_modified=bom_info.modified,
+                    bom_qty=comp.bom_qty,
+                    project_qty=actual_req_qty,
+                    filters=filters,
+                    parent_assembly=bom_name
+                )
+                if row:
+                    rows.append(row)
+                    processed_nodes.add((project_value, comp.item_code))
+            else:
                 child_bom_qty = frappe.db.get_value("BOM", child_bom, "quantity") or 1.0
                 new_multiplier = actual_req_qty / float(child_bom_qty)
                 get_bom_components(child_bom, project_value, top_level_bom, comp.item_code, new_multiplier, visited_boms)
