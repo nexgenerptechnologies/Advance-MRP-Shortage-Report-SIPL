@@ -141,11 +141,11 @@ frappe.query_reports["Project Material Tracking Report"] = {
 			let color = "red";
 			if (data.status == "Pending PO") color = "red";
 			else if (data.status == "PO Raised") color = "orange";
-			else if (data.status == "Partially Received") color = "blue";
-			else if (data.status == "Fully Received") color = "green";
-			else if (data.status == "In Stock") color = "darkgreen";
+			else if (data.status == "Partially Received") color = "yellow";
+			else if (data.status == "Fully Received") color = "blue";
+			else if (data.status == "In Stock") color = "green";
 			else if (data.status == "Project Completed") color = "purple";
-			else if (data.status == "In Production") color = "yellow";
+			else if (data.status == "In Production") color = "gray";
 			
 			value = `<span class='indicator ${color}'>${data.status}</span>`;
 		}

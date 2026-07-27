@@ -112,15 +112,17 @@ def get_data(filters):
             item = r.get("item_code")
             if item not in grouped:
                 grouped[item] = r.copy()
-                grouped[item]["bom"] = "Multiple"
-                grouped[item]["bom_date"] = None
-                grouped[item]["bom_modified"] = None
             else:
                 grouped[item]["bom_qty"] += r.get("bom_qty", 0)
                 grouped[item]["project_qty"] += r.get("project_qty", 0)
                 grouped[item]["allocated_qty"] += r.get("allocated_qty", 0)
                 grouped[item]["shortage_qty"] += r.get("shortage_qty", 0)
                 grouped[item]["net_shortage"] += r.get("net_shortage", 0)
+                
+                if grouped[item].get("bom") != r.get("bom") and r.get("bom"):
+                    grouped[item]["bom"] = "Multiple"
+                    grouped[item]["bom_date"] = None
+                    grouped[item]["bom_modified"] = None
                 
                 if grouped[item].get("parent_assembly") != r.get("parent_assembly") and r.get("parent_assembly"):
                     grouped[item]["parent_assembly"] = "Multiple"
@@ -605,7 +607,7 @@ def apply_item_filters(rows, filters):
             match = False
         if filters.get("item_group") and r.get("item_group") != filters.get("item_group"):
             match = False
-        if filters.get("supplier") and r.get("supplier") not in (r.get("supplier") or ""):
+        if filters.get("supplier") and filters.get("supplier") not in (r.get("supplier") or ""):
             match = False
         if filters.get("purchase_order") and filters.get("purchase_order") not in (r.get("po_number") or ""):
             match = False
