@@ -300,8 +300,16 @@ def fetch_factory_stock(filters, demand_data):
     return rows
 
 def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, project_qty, filters, parent_assembly=None):
-    if filters.get("item_code") and item_code != filters.get("item_code"):
-        return None
+    item_filters = filters.get("item_code")
+    if item_filters:
+        if isinstance(item_filters, str):
+            import json
+            try:
+                item_filters = json.loads(item_filters)
+            except:
+                item_filters = [item_filters]
+        if item_code not in item_filters:
+            return None
         
     item = frappe.db.get_value("Item", item_code, ["item_name", "description", "brand", "item_group"], as_dict=True) or {}
     
@@ -481,6 +489,69 @@ def get_dynamic_bom_options(project=None, txt=None):
             
     boms = frappe.db.sql(f"SELECT name as value, name as description FROM `tabBOM` WHERE {' AND '.join(conditions)} LIMIT 50", values, as_dict=1)
     return boms
+
+@frappe.whitelist()
+def get_dynamic_item_options(project=None, bom=None, txt=None):
+    bom_cond = "1=1"
+    params = []
+    
+    boms = []
+    if bom:
+        import json
+        try:
+            boms = json.loads(bom)
+        except:
+            boms = [bom]
+            
+    if boms:
+        bom_cond = f"parent IN ({', '.join(['%s']*len(boms))})"
+        params.extend(boms)
+    elif project:
+        bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
+        if bom_project_field:
+            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1 AND is_active=1 AND is_default=1", (project,))
+            valid_boms = set()
+            
+            def get_child_boms(bom_name):
+                valid_boms.add(bom_name)
+                items = frappe.db.sql("SELECT item_code FROM `tabBOM Item` WHERE parent = %s", (bom_name,))
+                for item in items:
+                    child_bom = frappe.db.get_value("BOM", {"item": item[0], "is_default": 1, "is_active": 1, "docstatus": 1})
+                    if child_bom and child_bom not in valid_boms:
+                        get_child_boms(child_bom)
+                        
+            for b in top_boms:
+                get_child_boms(b[0])
+                
+            if valid_boms:
+                bom_cond = f"parent IN ({', '.join(['%s']*len(valid_boms))})"
+                params.extend(list(valid_boms))
+            else:
+                bom_cond = "1=0"
+                
+    query_bom = f"SELECT item_code FROM `tabBOM Item` WHERE {bom_cond}"
+    
+    proj_cond = "AND project = %s" if project else ""
+    query_po = f"SELECT item_code FROM `tabPurchase Order Item` WHERE docstatus = 1 {proj_cond}"
+    if project:
+        params.append(project)
+        
+    final_query = f"""
+        SELECT DISTINCT item_code as value, item_code as description 
+        FROM (
+            {query_bom}
+            UNION
+            {query_po}
+        ) as combined_items
+    """
+    
+    if txt:
+        final_query += " WHERE item_code LIKE %s"
+        params.append(f"%{txt}%")
+        
+    final_query += " ORDER BY item_code LIMIT 50"
+    
+    return frappe.db.sql(final_query, tuple(params), as_dict=1)
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
