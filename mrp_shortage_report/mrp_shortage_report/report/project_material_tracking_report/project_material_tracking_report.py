@@ -38,6 +38,7 @@ def get_columns():
         {"fieldname": "actual_delivery_date", "label": _("Actual Delivery Date"), "fieldtype": "Data", "width": 130},
         {"fieldname": "net_shortage", "label": _("Net Shortage"), "fieldtype": "Float", "width": 110},
         {"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 140},
+        {"fieldname": "remarks", "label": _("Remarks"), "fieldtype": "Data", "width": 200},
     ]
 
 def get_data(filters):
@@ -61,6 +62,18 @@ def get_data(filters):
     # Apply standard item filters (Item Group, Brand, etc.)
     all_rows = apply_item_filters(all_rows, filters)
     
+    # Fetch Item Alternatives
+    item_alternatives = frappe.db.sql("""
+        SELECT item_code, alternative_item_code 
+        FROM `tabItem Alternative`
+    """, as_dict=1)
+    
+    alt_map = {}
+    for alt in item_alternatives:
+        if alt.item_code not in alt_map:
+            alt_map[alt.item_code] = []
+        alt_map[alt.item_code].append(alt.alternative_item_code)
+
     # 3. Calculate logical allocations and true shortages per row
     stock_map = {}
     balance_map = {}
@@ -71,8 +84,62 @@ def get_data(filters):
         if item not in balance_map:
             balance_map[item] = r["balance_qty"]
             
+    new_alt_rows = []
+
+    for r in all_rows:
+        item = r["item_code"]
         req = r.get("project_qty", 0)
         
+        # Check if we have an alternative with stock/balance
+        used_alternative = None
+        if req > 0 and stock_map[item] + balance_map[item] < req:
+            if item in alt_map:
+                for alt_item in alt_map[item]:
+                    alt_stock = get_stock_qty(alt_item, filters.get("warehouse"))
+                    alt_po_details = get_po_details(alt_item, r.get("project"), filters.get("warehouse"), filters.get("po_number"))
+                    alt_balance = max(0, alt_po_details[2] - alt_po_details[3])
+                    
+                    if alt_stock + alt_balance > 0:
+                        used_alternative = alt_item
+                        break
+                        
+        if used_alternative:
+            r["allocated_qty"] = req
+            r["shortage_qty"] = 0
+            r["net_shortage"] = 0
+            r["remarks"] = f"Alternative Item {used_alternative} used"
+            
+            # Ensure the alternative item row is in the report
+            alt_row = next((row for row in all_rows if row["item_code"] == used_alternative), None)
+            if alt_row:
+                if not alt_row.get("remarks"):
+                    alt_row["remarks"] = f"Used in place of {item}"
+            else:
+                alt_row_new = next((row for row in new_alt_rows if row["item_code"] == used_alternative), None)
+                if alt_row_new:
+                    if not alt_row_new.get("remarks"):
+                        alt_row_new["remarks"] = f"Used in place of {item}"
+                else:
+                    new_row = build_row(
+                        item_code=used_alternative,
+                        project=r.get("project"),
+                        bom_name=r.get("bom"),
+                        bom_date=None,
+                        bom_modified=None,
+                        bom_qty=0,
+                        project_qty=0,
+                        filters=filters,
+                        parent_assembly=r.get("parent_assembly")
+                    )
+                    if new_row:
+                        new_row["remarks"] = f"Used in place of {item}"
+                        new_row["allocated_qty"] = 0
+                        new_row["shortage_qty"] = 0
+                        new_row["net_shortage"] = 0
+                        new_alt_rows.append(new_row)
+            continue
+        
+        # Normal Allocation
         # Allocate Stock
         if stock_map[item] >= req:
             r["allocated_qty"] = req
@@ -96,6 +163,8 @@ def get_data(filters):
         else:
             r["net_shortage"] = shortage - balance_map[item]
             balance_map[item] = 0
+            
+    all_rows.extend(new_alt_rows)
     
     # Apply PO Filter
     if filters.get("po_number"):
@@ -139,6 +208,12 @@ def get_data(filters):
                     grouped[item].get("project"),
                     item
                 )
+                
+                if r.get("remarks"):
+                    existing_remarks = grouped[item].get("remarks") or ""
+                    if r.get("remarks") not in existing_remarks:
+                        grouped[item]["remarks"] = (existing_remarks + " | " + r.get("remarks")).strip(" | ")
+                        
         all_rows = list(grouped.values())
         
     return all_rows
@@ -358,7 +433,8 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
         "exp_delivery_date": exp_delivery_date,
         "actual_delivery_date": actual_delivery_date,
         "net_shortage": net_shortage,
-        "status": status
+        "status": status,
+        "remarks": ""
     }
 
 def get_stock_qty(item_code, warehouse=None):
