@@ -28,61 +28,88 @@ def get_columns():
 def get_data(filters):
     bom_project_field = "project" if frappe.db.has_column("BOM", "project") else None
     
-    conditions = ["b.docstatus = 1", "b.is_active = 1", "b.is_default = 1"]
-    values = {}
-    
-    if filters.get("subassembly"):
-        subs = filters.get("subassembly")
-        if isinstance(subs, list):
-            conditions.append("b.name IN %(subassembly)s")
-            values["subassembly"] = tuple(subs)
-        else:
-            conditions.append("b.name = %(subassembly)s")
-            values["subassembly"] = subs
-            
-    elif filters.get("fg_bom"):
-        conditions.append("(b.name = %(fg_bom)s OR b.name IN (SELECT bom_no FROM `tabBOM Item` WHERE parent = %(fg_bom)s AND bom_no IS NOT NULL))")
-        values["fg_bom"] = filters.get("fg_bom")
-        
+    top_boms = []
+    if filters.get("fg_bom"):
+        top_boms = [filters.get("fg_bom")]
     elif filters.get("project"):
+        conditions = ["docstatus = 1", "is_active = 1", "is_default = 1"]
         if bom_project_field:
-            conditions.append(f"b.{bom_project_field} = %(project)s")
+            conditions.append(f"{bom_project_field} = %(project)s")
         else:
-            conditions.append("EXISTS (SELECT 1 FROM `tabWork Order` wo WHERE wo.bom_no = b.name AND wo.project = %(project)s)")
-        values["project"] = filters.get("project")
+            conditions.append("EXISTS (SELECT 1 FROM `tabWork Order` wo WHERE wo.bom_no = name AND wo.project = %(project)s)")
+        
+        top_boms = frappe.db.sql_list(f"SELECT name FROM `tabBOM` WHERE {' AND '.join(conditions)}", {"project": filters.get("project")})
+    elif filters.get("subassembly"):
+        subs = filters.get("subassembly")
+        if not isinstance(subs, list):
+            subs = [subs]
+        top_boms = subs
+    else:
+        conditions = ["docstatus = 1", "is_active = 1", "is_default = 1", "name NOT IN (SELECT bom_no FROM `tabBOM Item` WHERE bom_no IS NOT NULL)"]
+        top_boms = frappe.db.sql_list(f"SELECT name FROM `tabBOM` WHERE {' AND '.join(conditions)} LIMIT 50")
+
+    bom_list = []
+    visited_boms = set()
+    
+    def explode_boms(bom_name, project_val, multiplier=1.0, is_top=True):
+        if bom_name in visited_boms:
+            return
+        visited_boms.add(bom_name)
+        
+        bom_doc = frappe.db.get_value("BOM", bom_name, ["name", "item", "quantity", "creation", "modified"], as_dict=1)
+        if not bom_doc:
+            return
             
-    query = f"""
-        SELECT 
-            b.name as bom, 
-            b.item as item_code, 
-            b.creation as bom_upload_date, 
-            b.modified as bom_last_modified_date, 
-            b.quantity,
-            {f"b.{bom_project_field}" if bom_project_field else "NULL"} as project_from_bom
-        FROM `tabBOM` b
-        WHERE {" AND ".join(conditions)}
-        ORDER BY b.creation DESC
-    """
-    
-    boms = frappe.db.sql(query, values, as_dict=1)
-    
+        bom_list.append({
+            "bom": bom_doc.name,
+            "item_code": bom_doc.item,
+            "bom_upload_date": bom_doc.creation,
+            "bom_last_modified_date": bom_doc.modified,
+            "bom_quantity": float(bom_doc.quantity or 1.0),
+            "project": project_val,
+            "multiplier": multiplier,
+            "is_top": is_top
+        })
+        
+        # Child subassemblies
+        child_items = frappe.db.sql("""
+            SELECT item_code, qty, bom_no
+            FROM `tabBOM Item`
+            WHERE parent = %s
+        """, (bom_name,), as_dict=1)
+        
+        for c in child_items:
+            child_bom = c.bom_no
+            if not child_bom:
+                child_bom = frappe.db.get_value("BOM", {"item": c.item_code, "is_active": 1, "is_default": 1, "docstatus": 1})
+            
+            if child_bom:
+                child_multiplier = multiplier * (float(c.qty) / float(bom_doc.quantity or 1.0))
+                explode_boms(child_bom, project_val, multiplier=child_multiplier, is_top=False)
+
+    for tb in top_boms:
+        proj = filters.get("project") or (frappe.db.get_value("BOM", tb, bom_project_field) if bom_project_field else "")
+        explode_boms(tb, proj, multiplier=1.0, is_top=True)
+        
     data = []
-    for b in boms:
-        project = b.project_from_bom or filters.get("project") or ""
-        item_name = frappe.db.get_value("Item", b.item_code, "item_name")
+    import json
+    
+    for b in bom_list:
+        # Subassembly filter
+        if filters.get("subassembly"):
+            subs = filters.get("subassembly")
+            if isinstance(subs, str):
+                subs = [subs]
+            if b["bom"] not in subs:
+                continue
+                
+        project = b["project"] or filters.get("project") or ""
+        item_name = frappe.db.get_value("Item", b["item_code"], "item_name") or b["item_code"]
         
-        required_qty = b.quantity
-        if project:
-            parent_bom = frappe.db.get_value("BOM", {bom_project_field: project}, "name") if bom_project_field else None
-            if parent_bom:
-                req_qty_in_project = frappe.db.sql("SELECT sum(qty) FROM `tabBOM Item` WHERE parent=%s AND item_code=%s", (parent_bom, b.item_code))
-                if req_qty_in_project and req_qty_in_project[0][0]:
-                    required_qty = req_qty_in_project[0][0]
-                    
-        stock_qty = get_stock_qty(b.item_code)
-        shortage = max(0, required_qty - stock_qty)
+        required_qty = b["multiplier"] * b["bom_quantity"]
+        stock_qty = get_stock_qty(b["item_code"])
+        shortage = max(0.0, required_qty - stock_qty)
         
-        import json
         missing_count = 0
         missing_items = []
         
@@ -91,12 +118,11 @@ def get_data(filters):
             FROM `tabBOM Item` bi
             LEFT JOIN `tabItem` i ON bi.item_code = i.name
             WHERE bi.parent=%s
-        """, (b.bom,), as_dict=1)
+        """, (b["bom"],), as_dict=1)
+        
         for child in bom_items:
             child_stock = get_stock_qty(child.item_code)
-            # Calculate requirement for needed quantity
-            eval_qty = shortage if shortage > 0 else required_qty
-            child_req = (child.qty / b.quantity) * eval_qty
+            child_req = (float(child.qty) / b["bom_quantity"]) * required_qty
             if child_stock < child_req:
                 missing_count += 1
                 missing_items.append({
@@ -107,27 +133,19 @@ def get_data(filters):
                 })
                 
         missing_items_json = json.dumps(missing_items) if missing_items else ""
-                
-        status = "Completed"
-        if project:
-            is_project_completed = frappe.db.get_value("Project", project, "status") == "Completed"
-            if is_project_completed:
-                status = "Completed"
-            else:
-                status = calculate_status(shortage, missing_count, b.bom, project)
-        else:
-            status = calculate_status(shortage, missing_count, b.bom, project)
+        
+        status = calculate_status(shortage, missing_count, stock_qty, required_qty, project)
             
         if filters.get("status") and status != filters.get("status"):
             continue
             
         data.append({
             "project": project,
-            "bom": b.bom,
-            "item_code": b.item_code,
+            "bom": b["bom"],
+            "item_code": b["item_code"],
             "item_name": item_name,
-            "bom_upload_date": b.bom_upload_date.date() if b.bom_upload_date else None,
-            "bom_last_modified_date": b.bom_last_modified_date.date() if b.bom_last_modified_date else None,
+            "bom_upload_date": b["bom_upload_date"].date() if b["bom_upload_date"] else None,
+            "bom_last_modified_date": b["bom_last_modified_date"].date() if b["bom_last_modified_date"] else None,
             "required_qty": required_qty,
             "shortage": shortage,
             "missing_components": missing_count,
@@ -137,14 +155,19 @@ def get_data(filters):
         
     return data
 
-def calculate_status(shortage, missing_count, bom_no, project):
-    if shortage <= 0:
-        return "Completed"
+def calculate_status(shortage, missing_count, stock_qty, required_qty, project=None):
+    if project:
+        is_project_completed = frappe.db.get_value("Project", project, "status") == "Completed"
+        if is_project_completed:
+            return "Completed"
+            
+    if missing_count > 0:
+        return "Material Shortage"
     
-    if missing_count == 0:
+    if shortage > 0 or stock_qty < required_qty:
         return "Ready for Production"
         
-    return "Material Shortage"
+    return "Completed"
 
 def get_stock_qty(item_code):
     bins = frappe.db.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
