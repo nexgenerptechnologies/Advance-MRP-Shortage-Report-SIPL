@@ -13,9 +13,9 @@ def execute(filters=None):
 def get_columns():
     return [
         {"fieldname": "project", "label": _("Project"), "fieldtype": "Link", "options": "Project", "width": 150},
+        {"fieldname": "bom", "label": _("BOM"), "fieldtype": "Link", "options": "BOM", "width": 180},
         {"fieldname": "item_code", "label": _("Subassembly Item Code"), "fieldtype": "Link", "options": "Item", "width": 180},
         {"fieldname": "item_name", "label": _("Subassembly Item Name"), "fieldtype": "Data", "width": 200},
-        {"fieldname": "bom", "label": _("BOM"), "fieldtype": "Link", "options": "BOM", "width": 150},
         {"fieldname": "bom_upload_date", "label": _("BOM Upload Date"), "fieldtype": "Date", "width": 120},
         {"fieldname": "bom_last_modified_date", "label": _("BOM Last Modified Date"), "fieldtype": "Date", "width": 160},
         {"fieldname": "required_qty", "label": _("Required Qty"), "fieldtype": "Float", "width": 120},
@@ -28,7 +28,7 @@ def get_columns():
 def get_data(filters):
     bom_project_field = "project" if frappe.db.has_column("BOM", "project") else None
     
-    conditions = ["b.docstatus = 1", "b.is_active = 1"]
+    conditions = ["b.docstatus = 1", "b.is_active = 1", "b.is_default = 1"]
     values = {}
     
     if filters.get("subassembly"):
@@ -93,17 +93,18 @@ def get_data(filters):
             WHERE bi.parent=%s
         """, (b.bom,), as_dict=1)
         for child in bom_items:
-            if shortage > 0:
-                child_stock = get_stock_qty(child.item_code)
-                child_req = (child.qty / b.quantity) * shortage
-                if child_stock < child_req:
-                    missing_count += 1
-                    missing_items.append({
-                        "item_code": child.item_code,
-                        "item_name": child.item_name,
-                        "item_group": child.item_group,
-                        "shortage": child_req - child_stock
-                    })
+            child_stock = get_stock_qty(child.item_code)
+            # Calculate requirement for needed quantity
+            eval_qty = shortage if shortage > 0 else required_qty
+            child_req = (child.qty / b.quantity) * eval_qty
+            if child_stock < child_req:
+                missing_count += 1
+                missing_items.append({
+                    "item_code": child.item_code,
+                    "item_name": child.item_name,
+                    "item_group": child.item_group,
+                    "shortage": child_req - child_stock
+                })
                 
         missing_items_json = json.dumps(missing_items) if missing_items else ""
                 
@@ -122,9 +123,9 @@ def get_data(filters):
             
         data.append({
             "project": project,
+            "bom": b.bom,
             "item_code": b.item_code,
             "item_name": item_name,
-            "bom": b.bom,
             "bom_upload_date": b.bom_upload_date.date() if b.bom_upload_date else None,
             "bom_last_modified_date": b.bom_last_modified_date.date() if b.bom_last_modified_date else None,
             "required_qty": required_qty,
@@ -156,7 +157,7 @@ def get_fg_boms(doctype, txt, searchfield, start, page_len, filters):
         filters = json.loads(filters)
         
     project = filters.get("project") if filters else None
-    conditions = ["docstatus = 1", "is_active = 1", "name NOT IN (SELECT bom_no FROM `tabBOM Item` WHERE bom_no IS NOT NULL)"]
+    conditions = ["docstatus = 1", "is_active = 1", "is_default = 1", "name NOT IN (SELECT bom_no FROM `tabBOM Item` WHERE bom_no IS NOT NULL)"]
     if project:
         if frappe.db.has_column("BOM", "project"):
             conditions.append(f"project = '{project}'")
