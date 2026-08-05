@@ -3,6 +3,14 @@ frappe.query_reports["All Projects Budget Overview"] = {
 	"formatter": function(value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
 		
+		if (column.fieldname == "project" && data && data.project) {
+			let display_code = data.project;
+			if (display_code.indexOf(":") !== -1) {
+				display_code = display_code.split(":")[0].trim();
+			}
+			value = `<a href="/app/project/${encodeURIComponent(data.project)}" data-doctype="Project" data-name="${frappe.utils.escape_html(data.project)}">${frappe.utils.escape_html(display_code)}</a>`;
+		}
+
 		if (column.fieldname == "percent_expended" || column.fieldname == "percent_committed" || column.fieldname == "percent_payment_received") {
 			if (data && data[column.fieldname] > 100) {
 				value = "<span style='color:red'>" + value + "</span>";
