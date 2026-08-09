@@ -34,12 +34,15 @@ def set_budget_on_load(doc, method):
     if not fieldname:
         return
         
-    project = doc.get("project")
-    if not project and doc.get("items"):
+    project = None
+    if doc.get("items"):
         for item in doc.get("items"):
             if item.project:
                 project = item.project
                 break
+                
+    if not project:
+        project = doc.get("project")
                 
     val = 0.0
     if project:
@@ -72,12 +75,15 @@ def debug_budget(po_name):
             
     custom_fields = frappe.db.sql("SELECT fieldname, label FROM `tabCustom Field` WHERE dt='Purchase Order' AND label LIKE '%budget%'", as_dict=1)
     
-    project = doc.get("project")
-    if not project and doc.get("items"):
+    project = None
+    if doc.get("items"):
         for item in doc.get("items"):
             if item.project:
                 project = item.project
                 break
+                
+    if not project:
+        project = doc.get("project")
                 
     budget_val = 0.0
     if project:

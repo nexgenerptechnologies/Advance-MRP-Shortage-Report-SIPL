@@ -14,16 +14,21 @@ frappe.ui.form.on("Purchase Order Item", {
 });
 
 function update_project_budget(frm) {
-    let project = frm.doc.project;
+    let project = null;
     
-    // If no project at header, check first item
-    if (!project && frm.doc.items && frm.doc.items.length > 0) {
+    // Always prefer project from items first, as header project might be incorrectly populated
+    if (frm.doc.items && frm.doc.items.length > 0) {
         for (let i = 0; i < frm.doc.items.length; i++) {
             if (frm.doc.items[i].project) {
                 project = frm.doc.items[i].project;
                 break;
             }
         }
+    }
+    
+    // Fallback to header project
+    if (!project) {
+        project = frm.doc.project;
     }
     
     if (project) {

@@ -10,3 +10,7 @@ doc_events = {
         "onload": "mrp_shortage_report.mrp_shortage_report.api.set_budget_on_load"
     }
 }
+
+doctype_js = {
+    "Purchase Order": "public/js/purchase_order.js"
+}
