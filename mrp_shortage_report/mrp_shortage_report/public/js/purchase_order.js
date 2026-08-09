@@ -31,14 +31,26 @@ function update_project_budget(frm) {
             method: "mrp_shortage_report.mrp_shortage_report.api.get_project_budget_used",
             args: { project: project },
             callback: function(r) {
-                if (r.message !== undefined && frm.doc.custom_project_budget_used !== r.message) {
-                    frm.set_value("custom_project_budget_used", r.message);
+                if (r.message !== undefined) {
+                    let fieldname = null;
+                    if (frm.fields_dict.custom_project_budget_used) {
+                        fieldname = "custom_project_budget_used";
+                    } else if (frm.fields_dict.project_budget_used) {
+                        fieldname = "project_budget_used";
+                    }
+                    
+                    if (fieldname && frm.doc[fieldname] !== r.message) {
+                        frm.set_value(fieldname, r.message);
+                    }
                 }
             }
         });
     } else {
-        if (frm.doc.custom_project_budget_used !== 0) {
-            frm.set_value("custom_project_budget_used", 0);
+        let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
+                        (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
+                        
+        if (fieldname && frm.doc[fieldname] !== 0) {
+            frm.set_value(fieldname, 0);
         }
     }
 }

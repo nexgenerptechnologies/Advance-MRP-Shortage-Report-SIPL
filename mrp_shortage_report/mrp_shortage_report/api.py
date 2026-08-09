@@ -6,7 +6,7 @@ def get_project_budget_used(project):
         return 0.0
         
     budget = frappe.db.sql("""
-        SELECT sum(base_net_amount)
+        SELECT sum(IFNULL(base_net_amount, amount))
         FROM `tabPurchase Order Item`
         WHERE project = %s 
         AND parenttype = 'Purchase Order'
