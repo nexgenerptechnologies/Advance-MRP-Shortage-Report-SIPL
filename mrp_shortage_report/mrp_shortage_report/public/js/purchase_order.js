@@ -39,8 +39,12 @@ function update_project_budget(frm) {
                         fieldname = "project_budget_used";
                     }
                     
-                    if (fieldname && frm.doc[fieldname] !== r.message) {
+                    if (fieldname) {
                         frm.set_value(fieldname, r.message);
+                        frappe.show_alert({
+                            message: __('Project Budget Used Updated: ' + format_currency(r.message)),
+                            indicator: 'green'
+                        });
                     }
                 }
             }
