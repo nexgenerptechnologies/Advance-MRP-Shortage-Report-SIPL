@@ -12,6 +12,24 @@ def execute(filters=None):
     columns = get_columns()
     data = []
     
+    # Pre-fetch Sales Orders
+    so_data = frappe.db.sql("""
+        SELECT project, GROUP_CONCAT(name SEPARATOR ', ') as so_no, SUM(base_net_total) as so_value
+        FROM `tabSales Order`
+        WHERE docstatus = 1 AND project IS NOT NULL AND project != ''
+        GROUP BY project
+    """, as_dict=1)
+    so_map = {row.project: row for row in so_data}
+    
+    # Pre-fetch Sales Invoices
+    si_data = frappe.db.sql("""
+        SELECT project, GROUP_CONCAT(name SEPARATOR ', ') as si_no, GROUP_CONCAT(posting_date SEPARATOR ', ') as si_date
+        FROM `tabSales Invoice`
+        WHERE docstatus = 1 AND project IS NOT NULL AND project != ''
+        GROUP BY project
+    """, as_dict=1)
+    si_map = {row.project: row for row in si_data}
+    
     projects = frappe.get_all("Project", fields=["name", "project_name"])
     
     for proj in projects:
@@ -58,10 +76,16 @@ def execute(filters=None):
         percent_committed = (total_committed / estimated_cost * 100) if estimated_cost > 0 else 0.0
         percent_payment_received = (payment_received / estimated_cost * 100) if estimated_cost > 0 else 0.0
 
+        so_info = so_map.get(project, {})
+        si_info = si_map.get(project, {})
         
         data.append({
             "project": project,
             "project_name": proj.project_name,
+            "sales_order_no": so_info.get("so_no"),
+            "sales_order_value": so_info.get("so_value", 0.0),
+            "sales_invoice_no": si_info.get("si_no"),
+            "sales_invoice_date": si_info.get("si_date"),
             "project_budget": estimated_cost,
             "payment_received": payment_received,
             "actual_expenditures": actual_expenditures,
@@ -86,6 +110,10 @@ def get_columns():
     return [
         {"fieldname": "project", "label": _("Project"), "fieldtype": "Link", "options": "Project", "width": 200},
         {"fieldname": "project_name", "label": _("Project Name"), "fieldtype": "Data", "width": 250},
+        {"fieldname": "sales_order_no", "label": _("Sales Order No"), "fieldtype": "Data", "width": 150},
+        {"fieldname": "sales_order_value", "label": _("Sales Order Value"), "fieldtype": "Currency", "width": 140},
+        {"fieldname": "sales_invoice_no", "label": _("Sales Invoice No"), "fieldtype": "Data", "width": 150},
+        {"fieldname": "sales_invoice_date", "label": _("Sales Invoice Date"), "fieldtype": "Data", "width": 150},
         {"fieldname": "project_days", "label": _("Project Days"), "fieldtype": "Int", "width": 110},
         {"fieldname": "project_budget", "label": _("Project Budget"), "fieldtype": "Currency", "width": 140},
         {"fieldname": "payment_received", "label": _("Payment Received"), "fieldtype": "Currency", "width": 140},
