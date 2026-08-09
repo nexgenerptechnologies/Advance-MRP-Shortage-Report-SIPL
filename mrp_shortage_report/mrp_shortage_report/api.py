@@ -59,3 +59,41 @@ def set_budget_on_load(doc, method):
     # 2. Directly update the database to ensure it persists and appears immediately on refresh
     if not doc.is_new():
         frappe.db.set_value(doc.doctype, doc.name, fieldname, val, update_modified=False)
+
+@frappe.whitelist()
+def debug_budget(po_name):
+    # Debug tool to figure out what's wrong
+    doc = frappe.get_doc("Purchase Order", po_name)
+    
+    fields = []
+    for f in frappe.get_meta("Purchase Order").fields:
+        if "budget" in (f.label or "").lower():
+            fields.append({"fieldname": f.fieldname, "label": f.label})
+            
+    custom_fields = frappe.db.sql("SELECT fieldname, label FROM `tabCustom Field` WHERE dt='Purchase Order' AND label LIKE '%budget%'", as_dict=1)
+    
+    project = doc.get("project")
+    if not project and doc.get("items"):
+        for item in doc.get("items"):
+            if item.project:
+                project = item.project
+                break
+                
+    budget_val = 0.0
+    if project:
+        budget = frappe.db.sql("""
+            SELECT sum(IFNULL(base_net_amount, amount))
+            FROM `tabPurchase Order Item`
+            WHERE project = %s 
+            AND parenttype = 'Purchase Order'
+            AND parent IN (SELECT name FROM `tabPurchase Order` WHERE docstatus = 1)
+        """, project)
+        budget_val = budget[0][0] if budget and budget[0][0] else 0.0
+        
+    return {
+        "po_name": po_name,
+        "found_project": project,
+        "calculated_budget": budget_val,
+        "meta_fields": fields,
+        "db_custom_fields": custom_fields
+    }
