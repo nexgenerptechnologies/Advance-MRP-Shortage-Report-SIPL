@@ -5,15 +5,26 @@ def get_project_budget_used(project):
     if not project:
         return 0.0
         
-    budget = frappe.db.sql("""
-        SELECT sum(IFNULL(base_net_amount, amount))
-        FROM `tabPurchase Order Item`
-        WHERE project = %s 
-        AND parenttype = 'Purchase Order'
-        AND parent IN (SELECT name FROM `tabPurchase Order` WHERE docstatus = 1)
-    """, project)
-    
-    return budget[0][0] if budget and budget[0][0] else 0.0
+    try:
+        from mrp_shortage_report.mrp_shortage_report.report.project_document_summary.project_document_summary import (
+            get_purchase_invoices, get_journal_entries, get_purchase_orders
+        )
+        
+        actual_expenditures = 0.0
+        for row in get_purchase_invoices(project):
+            actual_expenditures += row.get("basic_value", 0.0)
+            
+        for row in get_journal_entries(project):
+            actual_expenditures += row.get("basic_value", 0.0)
+            
+        pending_po_value = 0.0
+        for row in get_purchase_orders(project, only_pending=True):
+            pending_po_value += row.get("basic_value", 0.0)
+            
+        return actual_expenditures + pending_po_value
+    except Exception as e:
+        frappe.log_error(f"Error calculating project budget: {e}", "MRP Shortage Report")
+        return 0.0
 
 def set_budget_on_load(doc, method):
     # Dynamically find the exact fieldname based on label
@@ -46,15 +57,25 @@ def set_budget_on_load(doc, method):
                 
     val = 0.0
     if project:
-        # Query total budget used by this project across all submitted POs
-        budget = frappe.db.sql("""
-            SELECT sum(IFNULL(base_net_amount, amount))
-            FROM `tabPurchase Order Item`
-            WHERE project = %s 
-            AND parenttype = 'Purchase Order'
-            AND parent IN (SELECT name FROM `tabPurchase Order` WHERE docstatus = 1)
-        """, project)
-        val = budget[0][0] if budget and budget[0][0] else 0.0
+        try:
+            from mrp_shortage_report.mrp_shortage_report.report.project_document_summary.project_document_summary import (
+                get_purchase_invoices, get_journal_entries, get_purchase_orders
+            )
+            
+            actual_expenditures = 0.0
+            for row in get_purchase_invoices(project):
+                actual_expenditures += row.get("basic_value", 0.0)
+                
+            for row in get_journal_entries(project):
+                actual_expenditures += row.get("basic_value", 0.0)
+                
+            pending_po_value = 0.0
+            for row in get_purchase_orders(project, only_pending=True):
+                pending_po_value += row.get("basic_value", 0.0)
+                
+            val = actual_expenditures + pending_po_value
+        except Exception as e:
+            frappe.log_error(f"Error calculating project budget on load: {e}", "MRP Shortage Report")
         
     # 1. Update the document object in memory
     doc.set(fieldname, val)
