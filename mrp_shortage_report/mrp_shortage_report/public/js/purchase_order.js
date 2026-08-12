@@ -45,11 +45,22 @@ function update_project_budget(frm) {
                     }
                     
                     if (fieldname) {
-                        frm.set_value(fieldname, r.message);
-                        frappe.show_alert({
-                            message: __('Project Budget Used Updated: ' + format_currency(r.message)),
-                            indicator: 'green'
-                        });
+                        if (frm.doc.docstatus === 0) {
+                            // Draft - can safely set value and make it dirty
+                            frm.set_value(fieldname, r.message);
+                        } else {
+                            // Submitted/Cancelled - just update UI without making form dirty
+                            frm.doc[fieldname] = r.message;
+                            frm.refresh_field(fieldname);
+                        }
+                        
+                        // Only show alert if the value was updated to something > 0
+                        if (r.message > 0) {
+                            frappe.show_alert({
+                                message: __('Project Budget Used: ' + format_currency(r.message)),
+                                indicator: 'green'
+                            });
+                        }
                     }
                 }
             }
@@ -59,7 +70,12 @@ function update_project_budget(frm) {
                         (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
                         
         if (fieldname && frm.doc[fieldname] !== 0) {
-            frm.set_value(fieldname, 0);
+            if (frm.doc.docstatus === 0) {
+                frm.set_value(fieldname, 0);
+            } else {
+                frm.doc[fieldname] = 0;
+                frm.refresh_field(fieldname);
+            }
         }
     }
 }
