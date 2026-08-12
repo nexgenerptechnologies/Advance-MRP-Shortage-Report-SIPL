@@ -1,6 +1,20 @@
 frappe.ui.form.on("Purchase Order", {
     refresh: function(frm) {
         update_project_budget(frm);
+        
+        // Neutralize rogue scripts that auto-fill Project Code on submitted forms
+        if (frm.doc.docstatus === 1) {
+            setTimeout(() => {
+                if (frm.is_dirty() && frm._doc_before_save && frm.doc.project !== frm._doc_before_save.project) {
+                    frm.set_value('project', frm._doc_before_save.project);
+                    frappe.msgprint({
+                        title: __('Auto-Correction'),
+                        indicator: 'green',
+                        message: __('Reverted an unauthorized change to Project Code caused by a background script. You can now safely create your Purchase Receipt.')
+                    });
+                }
+            }, 1000);
+        }
     },
     project: function(frm) {
         update_project_budget(frm);
