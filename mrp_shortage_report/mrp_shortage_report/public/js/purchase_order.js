@@ -1,16 +1,14 @@
 frappe.ui.form.on("Purchase Order", {
     onload: function(frm) {
         if (frm.doc.docstatus === 1) {
-            frm.__true_db_values = {};
-            // Fetch TRUE DB values directly per field to avoid missing column errors on custom fields
-            let fields_to_check = ['project', 'project_code', 'custom_project_code', 'custom_project'];
-            fields_to_check.forEach(f => {
-                if (frm.fields_dict[f]) {
-                    frappe.db.get_value('Purchase Order', frm.doc.name, f).then(r => {
-                        if (r && r.message) {
-                            frm.__true_db_values[f] = r.message[f];
-                        }
-                    });
+            // Fetch the ENTIRE true DB document directly to bypass missing column errors and malicious Python hooks
+            frappe.call({
+                method: 'frappe.client.get',
+                args: { doctype: 'Purchase Order', name: frm.doc.name },
+                callback: function(r) {
+                    if (r && r.message) {
+                        frm.__true_db_doc = r.message;
+                    }
                 }
             });
         }
@@ -34,11 +32,15 @@ frappe.ui.form.on("Purchase Order", {
     before_save: function(frm) {
         // Forcefully revert fields to their true DB value right before sending to server
         // This prevents the "Not allowed to change Project Code" validation error.
-        if (frm.doc.docstatus === 1 && frm.__true_db_values) {
+        if (frm.doc.docstatus === 1 && frm.__true_db_doc) {
             let fields_to_check = ['project', 'project_code', 'custom_project_code', 'custom_project'];
             fields_to_check.forEach(f => {
-                if (frm.fields_dict[f] && frm.__true_db_values.hasOwnProperty(f)) {
-                    frm.doc[f] = frm.__true_db_values[f];
+                if (frm.fields_dict[f]) {
+                    if (frm.__true_db_doc.hasOwnProperty(f)) {
+                        frm.doc[f] = frm.__true_db_doc[f];
+                    } else {
+                        frm.doc[f] = null; // Force null if not in DB to prevent validation errors
+                    }
                 }
             });
         }
@@ -58,9 +60,9 @@ function update_project_budget(frm) {
         }
     }
     
-    // 2. Fallback to header project or project_code
+    // 2. Fallback to header project or custom project codes
     if (!project) {
-        project = frm.doc.project_code || frm.doc.project;
+        project = frm.doc.custom_project_code || frm.doc.project_code || frm.doc.custom_project || frm.doc.project;
     }
     
     let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
