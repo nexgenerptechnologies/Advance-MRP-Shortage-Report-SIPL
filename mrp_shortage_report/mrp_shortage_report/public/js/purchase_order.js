@@ -52,6 +52,13 @@ function update_project_budget(frm) {
                             // Submitted - PURE DOM INJECTION that survives Frappe re-renders
                             frm.__fetched_budget = r.message;
                             
+                            // Failsafe: If the server erroneously sent a non-zero budget (due to caching of old python hooks),
+                            // wipe it from the frontend memory so Frappe doesn't try to save it and crash.
+                            if (frm.doc[fieldname] !== 0) {
+                                frm.doc[fieldname] = 0;
+                                // We don't call refresh_field here because our hook will handle the visual part
+                            }
+                            
                             let field = frm.fields_dict[fieldname];
                             if (field && !field.__budget_hooked) {
                                 let original_refresh = field.refresh;
