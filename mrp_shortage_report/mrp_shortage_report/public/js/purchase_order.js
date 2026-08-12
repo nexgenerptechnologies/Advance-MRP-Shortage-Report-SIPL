@@ -30,19 +30,19 @@ frappe.ui.form.on("Purchase Order", {
         update_project_budget(frm);
     },
     before_save: function(frm) {
-        // Forcefully revert fields to their true DB value right before sending to server
-        // This prevents the "Not allowed to change Project Code" validation error.
+        // ULTIMATE NEUTRALIZER: Forcefully revert ALL fields not allowed on submit to their true DB value
+        // This guarantees you will NEVER see a "Not allowed to change X after submission" error again!
         if (frm.doc.docstatus === 1 && frm.__true_db_doc) {
-            let fields_to_check = ['project', 'project_code', 'custom_project_code', 'custom_project'];
-            fields_to_check.forEach(f => {
-                if (frm.fields_dict[f]) {
-                    if (frm.__true_db_doc.hasOwnProperty(f)) {
-                        frm.doc[f] = frm.__true_db_doc[f];
+            for (let fieldname in frm.fields_dict) {
+                let df = frm.fields_dict[fieldname].df;
+                if (df && !df.allow_on_submit) {
+                    if (frm.__true_db_doc.hasOwnProperty(fieldname)) {
+                        frm.doc[fieldname] = frm.__true_db_doc[fieldname];
                     } else {
-                        frm.doc[f] = null; // Force null if not in DB to prevent validation errors
+                        frm.doc[fieldname] = null;
                     }
                 }
-            });
+            }
         }
     }
 });
@@ -50,7 +50,7 @@ frappe.ui.form.on("Purchase Order", {
 function update_project_budget(frm) {
     let project = null;
     
-    // 1. ALWAYS prefer project from items first, because the header might have a display name instead of the code
+    // 1. ALWAYS prefer project from items first
     if (frm.doc.items && frm.doc.items.length > 0) {
         for (let i = 0; i < frm.doc.items.length; i++) {
             if (frm.doc.items[i].project) {
@@ -60,9 +60,22 @@ function update_project_budget(frm) {
         }
     }
     
-    // 2. Fallback to header project or custom project codes
+    // 2. Dynamically hunt for any custom "Project Code" field the user might have added
     if (!project) {
-        project = frm.doc.custom_project_code || frm.doc.project_code || frm.doc.custom_project || frm.doc.project;
+        for (let fieldname in frm.fields_dict) {
+            let df = frm.fields_dict[fieldname].df;
+            if (df && df.label && df.label.toLowerCase().includes('project') && df.label.toLowerCase().includes('code')) {
+                if (frm.doc[fieldname]) {
+                    project = frm.doc[fieldname];
+                    break;
+                }
+            }
+        }
+    }
+    
+    // 3. Ultimate fallback to standard project field
+    if (!project) {
+        project = frm.doc.project;
     }
     
     let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
