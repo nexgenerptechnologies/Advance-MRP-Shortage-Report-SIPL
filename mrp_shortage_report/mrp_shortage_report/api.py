@@ -12,11 +12,21 @@ def get_project_budget_used(project):
             if found:
                 project = found
             else:
-                # Use robust SQL LIKE search to overcome dash/slash mismatches
-                search_term = project.replace("-", "%").replace("/", "%")
-                sql_result = frappe.db.sql("SELECT name FROM `tabProject` WHERE name LIKE %s", (f"%{search_term}%",))
-                if sql_result:
-                    project = sql_result[0][0]
+                # Use precise substitutions instead of LIKE to prevent matching the wrong project
+                # if there are multiple projects with similar names
+                candidates = [
+                    project.replace("-", "/", 1), # e.g. 26/27-SIPL-001
+                    project.replace("-", "/")     # e.g. 26/27/SIPL/001
+                ]
+                # Replace the SECOND dash with a slash (e.g. 26-27/SIPL-001)
+                parts = project.split("-", 2)
+                if len(parts) == 3:
+                    candidates.append(f"{parts[0]}-{parts[1]}/{parts[2]}")
+                    
+                for alt_project in candidates:
+                    if frappe.db.exists("Project", alt_project):
+                        project = alt_project
+                        break
         
         from mrp_shortage_report.mrp_shortage_report.report.project_document_summary.project_document_summary import (
             get_purchase_invoices, get_journal_entries, get_purchase_orders
