@@ -96,27 +96,52 @@ function update_project_budget(frm) {
             },
             callback: function(r) {
                 if (r && r.message !== undefined) {
-                    frm.__fetched_budget = r.message;
-                    
-                    // Use native Frappe set_value
-                    if (frm.doc[target_fieldname] !== frm.__fetched_budget) {
-                        frm.set_value(target_fieldname, frm.__fetched_budget);
-                    }
-                    
-                    // Interval enforcer
-                    if (!frm.__budget_enforcer) {
-                        frm.__budget_enforcer = setInterval(() => {
-                            if (frm.doc[target_fieldname] !== frm.__fetched_budget) {
-                                frm.set_value(target_fieldname, frm.__fetched_budget);
-                            }
-                        }, 500);
+                    if (frm.doc.docstatus === 0) {
+                        // Draft - can safely set value natively
+                        if (frm.doc[target_fieldname] !== r.message) {
+                            frm.set_value(target_fieldname, r.message);
+                        }
+                    } else {
+                        // Submitted - UNBREAKABLE DOM INJECTION
+                        // frm.set_value is blocked on submitted forms if "Allow on Submit" is false
+                        frm.__fetched_budget = r.message;
+                        
+                        // Failsafe wipe internal value to prevent server validation errors
+                        if (frm.doc[target_fieldname] !== 0) {
+                            frm.doc[target_fieldname] = 0;
+                        }
+                        
+                        if (!frm.__budget_interval) {
+                            frm.__budget_interval = setInterval(() => {
+                                if (frm.__fetched_budget !== undefined) {
+                                    let field = frm.fields_dict[target_fieldname];
+                                    if (field) {
+                                        let formatted_val = format_currency(frm.__fetched_budget, frm.doc.currency || frappe.boot.sysdefaults.currency);
+                                        if (field.$wrapper && field.$wrapper.find('.control-value').length > 0) {
+                                            if (field.$wrapper.find('.control-value').text() !== formatted_val) {
+                                                field.$wrapper.find('.control-value').text(formatted_val);
+                                            }
+                                        } else if (field.$input) {
+                                            if (field.$input.val() !== formatted_val) {
+                                                field.$input.val(formatted_val);
+                                            }
+                                        }
+                                    }
+                                }
+                            }, 500); // Enforce visually every 500ms
+                        }
                     }
                 }
             }
         });
     } else if (target_fieldname) {
         if (frm.doc[target_fieldname] !== 0) {
-            frm.set_value(target_fieldname, 0);
+            if (frm.doc.docstatus === 0) {
+                frm.set_value(target_fieldname, 0);
+            } else {
+                frm.__fetched_budget = 0;
+                frm.doc[target_fieldname] = 0;
+            }
         }
     }
 }
