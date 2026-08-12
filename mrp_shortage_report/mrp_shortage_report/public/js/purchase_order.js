@@ -1,9 +1,13 @@
 frappe.ui.form.on("Purchase Order", {
     refresh: function(frm) {
-        update_project_budget(frm);
+        if (frm.doc.docstatus === 0) {
+            update_project_budget(frm);
+        }
     },
     project: function(frm) {
-        update_project_budget(frm);
+        if (frm.doc.docstatus === 0) {
+            update_project_budget(frm);
+        }
     }
 });
 
