@@ -1,7 +1,8 @@
 frappe.ui.form.on("Purchase Order", {
     onload: function(frm) {
-        // Save the true DB value of Project Code before any rogue scripts modify it
+        // Save the true DB value before any rogue scripts modify it
         frm.__true_project = frm.doc.project;
+        frm.__true_project_code = frm.doc.project_code;
     },
     refresh: function(frm) {
         update_project_budget(frm);
@@ -20,24 +21,31 @@ frappe.ui.form.on("Purchase Order", {
         update_project_budget(frm);
     },
     before_save: function(frm) {
-        // Forcefully revert Project Code to its true DB value right before sending to server
+        // Forcefully revert fields to their true DB value right before sending to server
         // This prevents the "Not allowed to change Project Code" validation error.
-        if (frm.doc.docstatus === 1 && frm.__true_project !== undefined) {
-            frm.doc.project = frm.__true_project;
+        if (frm.doc.docstatus === 1) {
+            if (frm.__true_project !== undefined) frm.doc.project = frm.__true_project;
+            if (frm.__true_project_code !== undefined) frm.doc.project_code = frm.__true_project_code;
         }
     }
 });
 
 function update_project_budget(frm) {
-    let project = frm.doc.project;
+    let project = null;
     
-    if (!project && frm.doc.items && frm.doc.items.length > 0) {
+    // 1. ALWAYS prefer project from items first, because the header might have a display name instead of the code
+    if (frm.doc.items && frm.doc.items.length > 0) {
         for (let i = 0; i < frm.doc.items.length; i++) {
             if (frm.doc.items[i].project) {
                 project = frm.doc.items[i].project;
                 break;
             }
         }
+    }
+    
+    // 2. Fallback to header project or project_code
+    if (!project) {
+        project = frm.doc.project_code || frm.doc.project;
     }
     
     let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
