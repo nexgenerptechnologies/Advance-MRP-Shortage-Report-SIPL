@@ -122,6 +122,12 @@ def set_budget_on_load(doc, method):
         
     # 1. Update the document object in memory
     doc.set(fieldname, val)
+    
+    # 2. Forcefully bypass Frappe's allow_on_submit validation to write directly to DB
+    # This guarantees the budget appears in the List View for submitted documents
+    if not doc.is_new():
+        frappe.db.set_value(doc.doctype, doc.name, fieldname, val, update_modified=False)
+        frappe.db.commit()
 
 @frappe.whitelist()
 def debug_budget(po_name):

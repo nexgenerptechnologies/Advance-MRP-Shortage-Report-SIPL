@@ -8,3 +8,10 @@ app_license = "mit"
 doctype_js = {
     "Purchase Order": "public/js/purchase_order.js"
 }
+
+doc_events = {
+    "Purchase Order": {
+        "onload": "mrp_shortage_report.mrp_shortage_report.api.set_budget_on_load",
+        "on_update": "mrp_shortage_report.mrp_shortage_report.api.set_budget_on_load"
+    }
+}
