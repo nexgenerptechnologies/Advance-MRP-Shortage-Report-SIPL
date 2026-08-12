@@ -1,27 +1,16 @@
 frappe.ui.form.on("Purchase Order", {
     refresh: function(frm) {
-        if (frm.doc.docstatus === 0) {
-            update_project_budget(frm);
-        }
+        update_project_budget(frm);
     },
     project: function(frm) {
-        if (frm.doc.docstatus === 0) {
-            update_project_budget(frm);
-        }
-    }
-});
-
-frappe.ui.form.on("Purchase Order Item", {
-    project: function(frm, cdt, cdn) {
         update_project_budget(frm);
     }
 });
 
 function update_project_budget(frm) {
-    let project = null;
-    
-    // Always prefer project from items first, as header project might be incorrectly populated
-    if (frm.doc.items && frm.doc.items.length > 0) {
+    // 1. Get the Project. If the header project is empty, check the items.
+    let project = frm.doc.project;
+    if (!project && frm.doc.items && frm.doc.items.length > 0) {
         for (let i = 0; i < frm.doc.items.length; i++) {
             if (frm.doc.items[i].project) {
                 project = frm.doc.items[i].project;
@@ -30,55 +19,46 @@ function update_project_budget(frm) {
         }
     }
     
-    // Fallback to header project
-    if (!project) {
-        project = frm.doc.project;
-    }
-    
-    if (project) {
+    // 2. Identify the budget fieldname
+    let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
+                    (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
+
+    if (project && fieldname) {
         frappe.call({
             method: "mrp_shortage_report.mrp_shortage_report.api.get_project_budget_used",
-            args: { project: project },
+            args: {
+                project: project
+            },
             callback: function(r) {
                 if (r.message !== undefined) {
-                    let fieldname = null;
-                    if (frm.fields_dict.custom_project_budget_used) {
-                        fieldname = "custom_project_budget_used";
-                    } else if (frm.fields_dict.project_budget_used) {
-                        fieldname = "project_budget_used";
-                    }
-                    
-                    if (fieldname) {
-                        if (frm.doc.docstatus === 0) {
-                            // Draft - can safely set value and make it dirty
-                            frm.set_value(fieldname, r.message);
-                        } else {
-                            // Submitted/Cancelled - just update UI without making form dirty
-                            frm.doc[fieldname] = r.message;
-                            frm.refresh_field(fieldname);
+                    // PURE VISUAL UPDATE - Bypasses Frappe's dirty tracking entirely!
+                    let field = frm.fields_dict[fieldname];
+                    if (field) {
+                        let formatted_val = format_currency(r.message, frm.doc.currency);
+                        
+                        // If document is submitted, the field is rendered as text
+                        if (field.$wrapper.find('.control-value').length > 0) {
+                            field.$wrapper.find('.control-value').text(formatted_val);
+                        } 
+                        // If document is draft, it might be an input field
+                        else if (field.$input) {
+                            field.$input.val(formatted_val);
                         }
                         
-                        // Only show alert if the value was updated to something > 0
-                        if (r.message > 0) {
-                            frappe.show_alert({
-                                message: __('Project Budget Used: ' + format_currency(r.message)),
-                                indicator: 'green'
-                            });
-                        }
+                        // We do NOT modify frm.doc[fieldname] so Frappe stays completely unaware.
                     }
                 }
             }
         });
-    } else {
-        let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
-                        (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
-                        
-        if (fieldname && frm.doc[fieldname] !== 0) {
-            if (frm.doc.docstatus === 0) {
-                frm.set_value(fieldname, 0);
-            } else {
-                frm.doc[fieldname] = 0;
-                frm.refresh_field(fieldname);
+    } else if (fieldname) {
+        // Clear visually if no project
+        let field = frm.fields_dict[fieldname];
+        if (field) {
+            let formatted_val = format_currency(0, frm.doc.currency);
+            if (field.$wrapper.find('.control-value').length > 0) {
+                field.$wrapper.find('.control-value').text(formatted_val);
+            } else if (field.$input) {
+                field.$input.val(formatted_val);
             }
         }
     }
