@@ -1,29 +1,36 @@
 frappe.ui.form.on("Purchase Order", {
+    onload: function(frm) {
+        // Save the true DB value of Project Code before any rogue scripts modify it
+        frm.__true_project = frm.doc.project;
+    },
     refresh: function(frm) {
         update_project_budget(frm);
         
-        // Neutralize rogue scripts that auto-fill Project Code on submitted forms
+        // Neutralize rogue scripts visually
         if (frm.doc.docstatus === 1) {
             setTimeout(() => {
-                if (frm.is_dirty() && frm._doc_before_save && frm.doc.project !== frm._doc_before_save.project) {
-                    frm.set_value('project', frm._doc_before_save.project);
-                    frappe.msgprint({
-                        title: __('Auto-Correction'),
-                        indicator: 'green',
-                        message: __('Reverted an unauthorized change to Project Code caused by a background script. You can now safely create your Purchase Receipt.')
-                    });
+                if (frm.is_dirty()) {
+                    frm.doc.__unsaved = 0;
+                    frm.refresh_header();
                 }
             }, 1000);
         }
     },
     project: function(frm) {
         update_project_budget(frm);
+    },
+    before_save: function(frm) {
+        // Forcefully revert Project Code to its true DB value right before sending to server
+        // This prevents the "Not allowed to change Project Code" validation error.
+        if (frm.doc.docstatus === 1 && frm.__true_project !== undefined) {
+            frm.doc.project = frm.__true_project;
+        }
     }
 });
 
 function update_project_budget(frm) {
-    // 1. Get the Project. If the header project is empty, check the items.
     let project = frm.doc.project;
+    
     if (!project && frm.doc.items && frm.doc.items.length > 0) {
         for (let i = 0; i < frm.doc.items.length; i++) {
             if (frm.doc.items[i].project) {
@@ -33,7 +40,10 @@ function update_project_budget(frm) {
         }
     }
     
-    if (project) {
+    let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
+                    (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
+
+    if (project && fieldname) {
         frappe.call({
             method: "mrp_shortage_report.mrp_shortage_report.api.get_project_budget_used",
             args: {
@@ -41,66 +51,47 @@ function update_project_budget(frm) {
             },
             callback: function(r) {
                 if (r.message !== undefined) {
-                    let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
-                                    (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
-                                    
-                    if (fieldname) {
-                        if (frm.doc.docstatus === 0) {
-                            // Draft - can safely set value
-                            frm.set_value(fieldname, r.message);
-                        } else {
-                            // Submitted - PURE DOM INJECTION that survives Frappe re-renders
-                            frm.__fetched_budget = r.message;
-                            
-                            // Failsafe: If the server erroneously sent a non-zero budget (due to caching of old python hooks),
-                            // wipe it from the frontend memory so Frappe doesn't try to save it and crash.
-                            if (frm.doc[fieldname] !== 0) {
-                                frm.doc[fieldname] = 0;
-                                // We don't call refresh_field here because our hook will handle the visual part
-                            }
-                            
-                            let field = frm.fields_dict[fieldname];
-                            if (field && !field.__budget_hooked) {
-                                let original_refresh = field.refresh;
-                                field.refresh = function() {
-                                    // Let Frappe render its native value (0.00) first
-                                    if (original_refresh) {
-                                        original_refresh.apply(this, arguments);
-                                    }
-                                    
-                                    // Instantly overwrite it visually
-                                    if (frm.__fetched_budget !== undefined) {
+                    if (frm.doc.docstatus === 0) {
+                        // Draft - can safely set value
+                        frm.set_value(fieldname, r.message);
+                    } else {
+                        // Submitted - UNBREAKABLE DOM INJECTION
+                        frm.__fetched_budget = r.message;
+                        
+                        // Failsafe wipe
+                        if (frm.doc[fieldname] !== 0) {
+                            frm.doc[fieldname] = 0;
+                        }
+                        
+                        if (!frm.__budget_interval) {
+                            frm.__budget_interval = setInterval(() => {
+                                if (frm.__fetched_budget !== undefined) {
+                                    let field = frm.fields_dict[fieldname];
+                                    if (field) {
                                         let formatted_val = format_currency(frm.__fetched_budget, frm.doc.currency);
-                                        if (this.$wrapper && this.$wrapper.find('.control-value').length > 0) {
-                                            this.$wrapper.find('.control-value').text(formatted_val);
-                                        } else if (this.$input) {
-                                            this.$input.val(formatted_val);
+                                        if (field.$wrapper && field.$wrapper.find('.control-value').length > 0) {
+                                            if (field.$wrapper.find('.control-value').text() !== formatted_val) {
+                                                field.$wrapper.find('.control-value').text(formatted_val);
+                                            }
+                                        } else if (field.$input) {
+                                            if (field.$input.val() !== formatted_val) {
+                                                field.$input.val(formatted_val);
+                                            }
                                         }
                                     }
-                                };
-                                field.__budget_hooked = true;
-                            }
-                            
-                            // Trigger the hook immediately
-                            if (field) {
-                                field.refresh();
-                            }
+                                }
+                            }, 500); // Enforce visually every 500ms
                         }
                     }
                 }
             }
         });
-    } else {
-        let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
-                        (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
-        if (fieldname && frm.doc[fieldname] !== 0) {
+    } else if (fieldname) {
+        if (frm.doc[fieldname] !== 0) {
             if (frm.doc.docstatus === 0) {
                 frm.set_value(fieldname, 0);
             } else {
                 frm.__fetched_budget = 0;
-                if (frm.fields_dict[fieldname]) {
-                    frm.fields_dict[fieldname].refresh();
-                }
             }
         }
     }
