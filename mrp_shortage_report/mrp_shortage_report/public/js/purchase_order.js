@@ -33,11 +33,7 @@ function update_project_budget(frm) {
         }
     }
     
-    // 2. Identify the budget fieldname
-    let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
-                    (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
-
-    if (project && fieldname) {
+    if (project) {
         frappe.call({
             method: "mrp_shortage_report.mrp_shortage_report.api.get_project_budget_used",
             args: {
@@ -53,9 +49,35 @@ function update_project_budget(frm) {
                             // Draft - can safely set value
                             frm.set_value(fieldname, r.message);
                         } else {
-                            // Submitted - update memory and refresh without making it dirty
-                            frm.doc[fieldname] = r.message;
-                            frm.refresh_field(fieldname);
+                            // Submitted - PURE DOM INJECTION that survives Frappe re-renders
+                            frm.__fetched_budget = r.message;
+                            
+                            let field = frm.fields_dict[fieldname];
+                            if (field && !field.__budget_hooked) {
+                                let original_refresh = field.refresh;
+                                field.refresh = function() {
+                                    // Let Frappe render its native value (0.00) first
+                                    if (original_refresh) {
+                                        original_refresh.apply(this, arguments);
+                                    }
+                                    
+                                    // Instantly overwrite it visually
+                                    if (frm.__fetched_budget !== undefined) {
+                                        let formatted_val = format_currency(frm.__fetched_budget, frm.doc.currency);
+                                        if (this.$wrapper && this.$wrapper.find('.control-value').length > 0) {
+                                            this.$wrapper.find('.control-value').text(formatted_val);
+                                        } else if (this.$input) {
+                                            this.$input.val(formatted_val);
+                                        }
+                                    }
+                                };
+                                field.__budget_hooked = true;
+                            }
+                            
+                            // Trigger the hook immediately
+                            if (field) {
+                                field.refresh();
+                            }
                         }
                     }
                 }
@@ -68,8 +90,10 @@ function update_project_budget(frm) {
             if (frm.doc.docstatus === 0) {
                 frm.set_value(fieldname, 0);
             } else {
-                frm.doc[fieldname] = 0;
-                frm.refresh_field(fieldname);
+                frm.__fetched_budget = 0;
+                if (frm.fields_dict[fieldname]) {
+                    frm.fields_dict[fieldname].refresh();
+                }
             }
         }
     }

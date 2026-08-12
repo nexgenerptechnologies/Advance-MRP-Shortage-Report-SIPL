@@ -79,12 +79,6 @@ def set_budget_on_load(doc, method):
         
     # 1. Update the document object in memory
     doc.set(fieldname, val)
-    
-    # 2. Directly update the database to ensure it persists and appears immediately on refresh
-    if not doc.is_new():
-        frappe.db.set_value(doc.doctype, doc.name, fieldname, val, update_modified=False)
-        frappe.db.commit()
-        frappe.clear_document_cache(doc.doctype, doc.name)
 
 @frappe.whitelist()
 def debug_budget(po_name):
