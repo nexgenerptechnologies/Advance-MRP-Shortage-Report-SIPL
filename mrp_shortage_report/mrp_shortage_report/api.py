@@ -6,6 +6,21 @@ def get_project_budget_used(project):
         return 0.0
         
     try:
+        # Smartly resolve project name if a custom field value (like project_code) was passed
+        if not frappe.db.exists("Project", project):
+            found = frappe.db.get_value("Project", {"project_name": project}, "name")
+            if found:
+                project = found
+            else:
+                # Try replacing dashes with slashes just in case
+                alt_project = project.replace("-", "/", 1)
+                if frappe.db.exists("Project", alt_project):
+                    project = alt_project
+                else:
+                    alt_project_2 = project.replace("-", "/")
+                    if frappe.db.exists("Project", alt_project_2):
+                        project = alt_project_2
+        
         from mrp_shortage_report.mrp_shortage_report.report.project_document_summary.project_document_summary import (
             get_purchase_invoices, get_journal_entries, get_purchase_orders
         )

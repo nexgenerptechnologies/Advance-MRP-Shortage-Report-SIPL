@@ -3,6 +3,8 @@ frappe.ui.form.on("Purchase Order", {
         // Save the true DB value before any rogue scripts modify it
         frm.__true_project = frm.doc.project;
         frm.__true_project_code = frm.doc.project_code;
+        frm.__true_custom_project_code = frm.doc.custom_project_code;
+        frm.__true_custom_project = frm.doc.custom_project;
     },
     refresh: function(frm) {
         update_project_budget(frm);
@@ -26,6 +28,8 @@ frappe.ui.form.on("Purchase Order", {
         if (frm.doc.docstatus === 1) {
             if (frm.__true_project !== undefined) frm.doc.project = frm.__true_project;
             if (frm.__true_project_code !== undefined) frm.doc.project_code = frm.__true_project_code;
+            if (frm.__true_custom_project_code !== undefined) frm.doc.custom_project_code = frm.__true_custom_project_code;
+            if (frm.__true_custom_project !== undefined) frm.doc.custom_project = frm.__true_custom_project;
         }
     }
 });
