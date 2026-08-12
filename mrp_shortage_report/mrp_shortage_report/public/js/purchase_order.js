@@ -31,34 +31,31 @@ function update_project_budget(frm) {
             },
             callback: function(r) {
                 if (r.message !== undefined) {
-                    // PURE VISUAL UPDATE - Bypasses Frappe's dirty tracking entirely!
-                    let field = frm.fields_dict[fieldname];
-                    if (field) {
-                        let formatted_val = format_currency(r.message, frm.doc.currency);
-                        
-                        // If document is submitted, the field is rendered as text
-                        if (field.$wrapper.find('.control-value').length > 0) {
-                            field.$wrapper.find('.control-value').text(formatted_val);
-                        } 
-                        // If document is draft, it might be an input field
-                        else if (field.$input) {
-                            field.$input.val(formatted_val);
+                    let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
+                                    (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
+                                    
+                    if (fieldname) {
+                        if (frm.doc.docstatus === 0) {
+                            // Draft - can safely set value
+                            frm.set_value(fieldname, r.message);
+                        } else {
+                            // Submitted - update memory and refresh without making it dirty
+                            frm.doc[fieldname] = r.message;
+                            frm.refresh_field(fieldname);
                         }
-                        
-                        // We do NOT modify frm.doc[fieldname] so Frappe stays completely unaware.
                     }
                 }
             }
         });
-    } else if (fieldname) {
-        // Clear visually if no project
-        let field = frm.fields_dict[fieldname];
-        if (field) {
-            let formatted_val = format_currency(0, frm.doc.currency);
-            if (field.$wrapper.find('.control-value').length > 0) {
-                field.$wrapper.find('.control-value').text(formatted_val);
-            } else if (field.$input) {
-                field.$input.val(formatted_val);
+    } else {
+        let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
+                        (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
+        if (fieldname && frm.doc[fieldname] !== 0) {
+            if (frm.doc.docstatus === 0) {
+                frm.set_value(fieldname, 0);
+            } else {
+                frm.doc[fieldname] = 0;
+                frm.refresh_field(fieldname);
             }
         }
     }
