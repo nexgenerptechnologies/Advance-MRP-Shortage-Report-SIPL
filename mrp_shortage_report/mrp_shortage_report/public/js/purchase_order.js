@@ -64,7 +64,7 @@ function update_project_budget(frm) {
     if (!project) {
         for (let fieldname in frm.fields_dict) {
             let df = frm.fields_dict[fieldname].df;
-            if (df && df.label && df.label.toLowerCase().includes('project') && df.label.toLowerCase().includes('code')) {
+            if (df && df.label && df.label.toLowerCase().includes('project') && (df.label.toLowerCase().includes('code') || df.label.toLowerCase() === 'project')) {
                 if (frm.doc[fieldname]) {
                     project = frm.doc[fieldname];
                     break;
@@ -75,62 +75,48 @@ function update_project_budget(frm) {
     
     // 3. Ultimate fallback to standard project field
     if (!project) {
-        project = frm.doc.project;
+        project = frm.doc.project || frm.doc.project_code || frm.doc.custom_project_code;
     }
     
-    let fieldname = frm.fields_dict.custom_project_budget_used ? "custom_project_budget_used" : 
-                    (frm.fields_dict.project_budget_used ? "project_budget_used" : null);
-
-    if (project && fieldname) {
+    // Dynamically hunt for ANY field with "budget" in the label
+    let target_fieldname = null;
+    for (let f in frm.fields_dict) {
+        let df = frm.fields_dict[f].df;
+        if (df && df.label && df.label.toLowerCase().includes('budget')) {
+            target_fieldname = df.fieldname;
+            break;
+        }
+    }
+    
+    if (project && target_fieldname) {
         frappe.call({
             method: "mrp_shortage_report.mrp_shortage_report.api.get_project_budget_used",
             args: {
                 project: project
             },
             callback: function(r) {
-                if (r.message !== undefined) {
-                    if (frm.doc.docstatus === 0) {
-                        // Draft - can safely set value
-                        frm.set_value(fieldname, r.message);
-                    } else {
-                        // Submitted - UNBREAKABLE DOM INJECTION
-                        frm.__fetched_budget = r.message;
-                        
-                        // Failsafe wipe
-                        if (frm.doc[fieldname] !== 0) {
-                            frm.doc[fieldname] = 0;
-                        }
-                        
-                        if (!frm.__budget_interval) {
-                            frm.__budget_interval = setInterval(() => {
-                                if (frm.__fetched_budget !== undefined) {
-                                    let field = frm.fields_dict[fieldname];
-                                    if (field) {
-                                        let formatted_val = format_currency(frm.__fetched_budget, frm.doc.currency);
-                                        if (field.$wrapper && field.$wrapper.find('.control-value').length > 0) {
-                                            if (field.$wrapper.find('.control-value').text() !== formatted_val) {
-                                                field.$wrapper.find('.control-value').text(formatted_val);
-                                            }
-                                        } else if (field.$input) {
-                                            if (field.$input.val() !== formatted_val) {
-                                                field.$input.val(formatted_val);
-                                            }
-                                        }
-                                    }
-                                }
-                            }, 500); // Enforce visually every 500ms
-                        }
+                if (r && r.message !== undefined) {
+                    frm.__fetched_budget = r.message;
+                    
+                    // Use native Frappe set_value
+                    if (frm.doc[target_fieldname] !== frm.__fetched_budget) {
+                        frm.set_value(target_fieldname, frm.__fetched_budget);
+                    }
+                    
+                    // Interval enforcer
+                    if (!frm.__budget_enforcer) {
+                        frm.__budget_enforcer = setInterval(() => {
+                            if (frm.doc[target_fieldname] !== frm.__fetched_budget) {
+                                frm.set_value(target_fieldname, frm.__fetched_budget);
+                            }
+                        }, 500);
                     }
                 }
             }
         });
-    } else if (fieldname) {
-        if (frm.doc[fieldname] !== 0) {
-            if (frm.doc.docstatus === 0) {
-                frm.set_value(fieldname, 0);
-            } else {
-                frm.__fetched_budget = 0;
-            }
+    } else if (target_fieldname) {
+        if (frm.doc[target_fieldname] !== 0) {
+            frm.set_value(target_fieldname, 0);
         }
     }
 }

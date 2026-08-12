@@ -6,27 +6,34 @@ def get_project_budget_used(project):
         return 0.0
         
     try:
+        project = str(project).strip()
         # Smartly resolve project name if a custom field value (like project_code) was passed
         if not frappe.db.exists("Project", project):
             found = frappe.db.get_value("Project", {"project_name": project}, "name")
             if found:
                 project = found
             else:
-                # Use precise substitutions instead of LIKE to prevent matching the wrong project
-                # if there are multiple projects with similar names
                 candidates = [
                     project.replace("-", "/", 1), # e.g. 26/27-SIPL-001
                     project.replace("-", "/")     # e.g. 26/27/SIPL/001
                 ]
-                # Replace the SECOND dash with a slash (e.g. 26-27/SIPL-001)
                 parts = project.split("-", 2)
-                if len(parts) == 3:
+                if len(parts) >= 3:
                     candidates.append(f"{parts[0]}-{parts[1]}/{parts[2]}")
                     
+                search_term = project.replace("-", "%").replace("/", "%")
+                candidates.append(f"LIKE:%{search_term}%")
+                    
                 for alt_project in candidates:
-                    if frappe.db.exists("Project", alt_project):
-                        project = alt_project
-                        break
+                    if alt_project.startswith("LIKE:"):
+                        res = frappe.db.sql("SELECT name FROM `tabProject` WHERE name LIKE %s LIMIT 1", (alt_project[5:],))
+                        if res:
+                            project = res[0][0]
+                            break
+                    else:
+                        if frappe.db.exists("Project", alt_project):
+                            project = alt_project
+                            break
         
         from mrp_shortage_report.mrp_shortage_report.report.project_document_summary.project_document_summary import (
             get_purchase_invoices, get_journal_entries, get_purchase_orders
@@ -43,7 +50,21 @@ def get_project_budget_used(project):
         for row in get_purchase_orders(project, only_pending=True):
             pending_po_value += row.get("basic_value", 0.0)
             
-        return actual_expenditures + pending_po_value
+        total_val = actual_expenditures + pending_po_value
+        
+        if total_val == 0.0:
+            # Fallback to total PO value if pending is exactly 0 (e.g. all billed but PI not linked)
+            budget = frappe.db.sql("""
+                SELECT sum(IFNULL(base_net_amount, amount))
+                FROM `tabPurchase Order Item`
+                WHERE project = %s 
+                AND parenttype = 'Purchase Order'
+                AND parent IN (SELECT name FROM `tabPurchase Order` WHERE docstatus = 1)
+            """, project)
+            if budget and budget[0][0]:
+                total_val = budget[0][0]
+                
+        return total_val
     except Exception as e:
         frappe.log_error(f"Error calculating project budget: {e}", "MRP Shortage Report")
         return 0.0
