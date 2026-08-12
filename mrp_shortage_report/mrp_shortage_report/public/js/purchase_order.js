@@ -1,13 +1,18 @@
 frappe.ui.form.on("Purchase Order", {
     onload: function(frm) {
         if (frm.doc.docstatus === 1) {
-            // Fetch the TRUE DB values directly to completely bypass any malicious Python onload hooks
-            frappe.db.get_value('Purchase Order', frm.doc.name, ['project', 'project_code', 'custom_project_code', 'custom_project'])
-                .then(r => {
-                    if (r && r.message) {
-                        frm.__true_db_values = r.message;
-                    }
-                });
+            frm.__true_db_values = {};
+            // Fetch TRUE DB values directly per field to avoid missing column errors on custom fields
+            let fields_to_check = ['project', 'project_code', 'custom_project_code', 'custom_project'];
+            fields_to_check.forEach(f => {
+                if (frm.fields_dict[f]) {
+                    frappe.db.get_value('Purchase Order', frm.doc.name, f).then(r => {
+                        if (r && r.message) {
+                            frm.__true_db_values[f] = r.message[f];
+                        }
+                    });
+                }
+            });
         }
     },
     refresh: function(frm) {
@@ -30,10 +35,12 @@ frappe.ui.form.on("Purchase Order", {
         // Forcefully revert fields to their true DB value right before sending to server
         // This prevents the "Not allowed to change Project Code" validation error.
         if (frm.doc.docstatus === 1 && frm.__true_db_values) {
-            if ('project' in frm.__true_db_values) frm.doc.project = frm.__true_db_values.project;
-            if ('project_code' in frm.__true_db_values) frm.doc.project_code = frm.__true_db_values.project_code;
-            if ('custom_project_code' in frm.__true_db_values) frm.doc.custom_project_code = frm.__true_db_values.custom_project_code;
-            if ('custom_project' in frm.__true_db_values) frm.doc.custom_project = frm.__true_db_values.custom_project;
+            let fields_to_check = ['project', 'project_code', 'custom_project_code', 'custom_project'];
+            fields_to_check.forEach(f => {
+                if (frm.fields_dict[f] && frm.__true_db_values.hasOwnProperty(f)) {
+                    frm.doc[f] = frm.__true_db_values[f];
+                }
+            });
         }
     }
 });
