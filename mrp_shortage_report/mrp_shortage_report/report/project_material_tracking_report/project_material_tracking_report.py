@@ -242,7 +242,20 @@ def fetch_demand(filters):
     bom_query = f"SELECT name, item, quantity, creation, modified, {bom_project_field or 'NULL'} as project FROM `tabBOM` WHERE " + " AND ".join(conditions)
     boms = frappe.db.sql(bom_query, values, as_dict=1)
     
+    if not filters.get("bom"):
+        # Prevent Double Counting: Filter out BOMs that are subassemblies of other BOMs in the current fetched list
+        bom_names = [b.name for b in boms]
+        if bom_names:
+            child_items_data = frappe.db.sql(f"SELECT DISTINCT item_code FROM `tabBOM Item` WHERE parent IN ({', '.join(['%s']*len(bom_names))})", tuple(bom_names))
+            child_items = set([row[0] for row in child_items_data])
+            top_level_boms = [b for b in boms if b.item not in child_items]
+        else:
+            top_level_boms = []
+    else:
+        top_level_boms = boms
+    
     processed_nodes = set()
+
     
     def get_bom_components(bom_name, project_value, top_level_bom, parent_assembly, multiplier=1.0, visited_boms=None):
         if visited_boms is None:
@@ -288,7 +301,7 @@ def fetch_demand(filters):
                 new_multiplier = actual_req_qty / float(child_bom_qty)
                 get_bom_components(child_bom, project_value, top_level_bom, comp.item_code, new_multiplier, visited_boms)
 
-    for bom in boms:
+    for bom in top_level_boms:
         # Start the recursive fetch. Parent assembly is the top-level BOM item.
         project_val = filters.get("project") or bom.project
         get_bom_components(bom.name, project_val, bom.name, bom.item, multiplier=1.0)
