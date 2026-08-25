@@ -131,14 +131,6 @@ def set_budget_on_load(doc, method):
 
 @frappe.whitelist()
 def debug_budget(po_name):
-    # Debug tool to figure out what's wrong
-    doc = frappe.get_doc("Purchase Order", po_name)
-    
-    fields = []
-    for f in frappe.get_meta("Purchase Order").fields:
-        if "budget" in (f.label or "").lower():
-            fields.append({"fieldname": f.fieldname, "label": f.label})
-            
     custom_fields = frappe.db.sql("SELECT fieldname, label FROM `tabCustom Field` WHERE dt='Purchase Order' AND label LIKE '%budget%'", as_dict=1)
     
     project = None
@@ -166,6 +158,59 @@ def debug_budget(po_name):
         "po_name": po_name,
         "found_project": project,
         "calculated_budget": budget_val,
-        "meta_fields": fields,
         "db_custom_fields": custom_fields
     }
+
+@frappe.whitelist()
+def get_po_shortage_data(project):
+    """
+    Server-side function to calculate TRUE shortage by analyzing global demand vs project demand.
+    Returns the items that have a true global shortage for the given project.
+    """
+    from mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report import get_data
+    import json
+    
+    # 1. Fetch demand specifically for THIS project
+    project_data = get_data({"project": project, "group_by_item": 1})
+    
+    project_items = [d.get("item_code") for d in project_data if d.get("item_code")]
+    if not project_items:
+        return []
+        
+    # 2. Fetch GLOBAL demand across ALL projects, but only for the items this project needs
+    global_data = get_data({"group_by_item": 1, "item_code": json.dumps(project_items)})
+    
+    global_map = {d.get("item_code"): d for d in global_data}
+    
+    result = []
+    for d in project_data:
+        item_code = d.get("item_code")
+        g = global_map.get(item_code, {})
+        
+        project_qty = d.get("project_qty") or 0.0
+        total_req_qty = g.get("project_qty") or project_qty
+        stock_qty = g.get("stock_qty") or 0.0
+        pending_po_qty = g.get("balance_qty") or 0.0 # balance_qty represents pending PO qty
+        
+        # Calculate Global Net Shortage
+        global_net_shortage = max(0, total_req_qty - stock_qty - pending_po_qty)
+        
+        if global_net_shortage > 0 and project_qty > 0:
+            # How much to order for THIS project?
+            # It should not exceed what the project actually needs, and it shouldn't exceed the global shortage.
+            net_shortage_for_project = min(project_qty, global_net_shortage)
+            
+            result.append({
+                "item_code": item_code,
+                "item_name": d.get("item_name"),
+                "custom_make": d.get("brand"),
+                "bom_no": d.get("bom"),
+                "project_req_qty": project_qty,
+                "total_req_qty": total_req_qty,
+                "stock_qty": stock_qty,
+                "pending_po_qty": pending_po_qty,
+                "global_shortage": global_net_shortage,
+                "net_shortage": net_shortage_for_project
+            })
+            
+    return result
