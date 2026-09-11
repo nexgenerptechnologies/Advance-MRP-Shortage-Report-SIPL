@@ -100,7 +100,13 @@ frappe.query_reports["Project Material Tracking Report"] = {
 							"bom": JSON.stringify(frappe.query_report.get_filter_value('bom') || [])
 						}
 					}
-				}).then(r => r.message || []);
+				}).then(r => {
+					let res = r.message || [];
+					return res.map(row => {
+						let val = Array.isArray(row) ? row[0] : (row.value || row.name || row.item_group || row);
+						return { value: val, description: val };
+					});
+				});
 			}
 		},
 		{
