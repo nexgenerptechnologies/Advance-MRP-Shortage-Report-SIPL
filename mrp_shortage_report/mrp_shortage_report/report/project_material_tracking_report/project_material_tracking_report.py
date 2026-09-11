@@ -1,6 +1,20 @@
 import frappe
 from frappe import _
 
+
+def parse_multi_filter(filter_val):
+    if not filter_val:
+        return []
+    if isinstance(filter_val, list):
+        return filter_val
+    import json
+    try:
+        val = json.loads(filter_val)
+        if isinstance(val, list): return val
+        return [filter_val]
+    except:
+        return [filter_val]
+
 def execute(filters=None):
     if not filters:
         filters = {}
@@ -12,7 +26,7 @@ def execute(filters=None):
 
 def get_columns():
     return [
-        {"fieldname": "project", "label": _("Project"), "fieldtype": "Link", "options": "Project", "width": 140},
+        {"fieldname": "project", "label": _("Project"), "fieldtype": "Data", "width": 140},
         {"fieldname": "bom", "label": _("BOM"), "fieldtype": "Link", "options": "BOM", "width": 140},
         {"fieldname": "parent_assembly", "label": _("Subassembly BOM"), "fieldtype": "Link", "options": "BOM", "width": 140},
         {"fieldname": "bom_date", "label": _("BOM Upload Date"), "fieldtype": "Date", "width": 120},
@@ -227,9 +241,13 @@ def fetch_demand(filters):
     values = {}
     
     if filters.get("project") and bom_project_field:
+        projects = parse_multi_filter(filters.get("project"))
         if not filters.get("bom"):
-            conditions.append(f"{bom_project_field} = %(project)s")
-        values["project"] = filters.get("project")
+            if projects:
+                conditions.append(f"{bom_project_field} IN %(project)s")
+            else:
+                conditions.append("1=0")
+        values["project"] = tuple(projects) if projects else ('',)
     if filters.get("bom"):
         boms = filters.get("bom")
         if isinstance(boms, list):
@@ -310,26 +328,28 @@ def fetch_demand(filters):
 
 def fetch_extra_project_items(filters, existing_data):
     rows = []
-    project = filters.get("project")
-    if not project:
+    project_filter = filters.get("project")
+    if not project_filter:
         return rows
+    projects = parse_multi_filter(project_filter)
+    if not projects: return rows
         
     existing_items = set([r.get("item_code") for r in existing_data])
     
     # Find items on Purchase Orders for this project
-    po_items = frappe.db.sql("""
-        SELECT DISTINCT item_code 
+    format_strings = ','.join(['%s'] * len(projects))
+    po_items = frappe.db.sql(f"""
+        SELECT DISTINCT item_code, project 
         FROM `tabPurchase Order Item`
-        WHERE project = %s AND docstatus = 1
-    """, (project,), as_dict=1)
+        WHERE project IN ({format_strings}) AND docstatus = 1
+    """, tuple(projects), as_dict=1)
     
-    all_extra = [pi.item_code for pi in po_items]
-    
-    for item_code in set(all_extra):
+    for pi in po_items:
+        item_code = pi.item_code
         if item_code not in existing_items:
             row = build_row(
                 item_code=item_code,
-                project=project,
+                project=pi.project,
                 bom_name=None,
                 bom_date=None,
                 bom_modified=None,
@@ -525,11 +545,11 @@ def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None, ite
                 FROM `tabStock Entry Detail` sed
                 INNER JOIN `tabStock Entry` se ON sed.parent = se.name
                 WHERE se.docstatus = 1 
-                  AND se.purpose IN ('Material Transfer for Manufacture', 'Material Transfer')
-                  AND se.project = %s
+                  AND se.purpose IN ('Material Transfer for Manufacture', 'Material Transfer', 'Manufacture')
+                  AND (se.project = %s OR sed.project = %s)
                   AND sed.item_code = %s
                 LIMIT 1
-            """, (project, item_code))
+            """, (project, project, item_code))
             if in_production:
                 return "In Production"
             
@@ -556,7 +576,9 @@ def get_dynamic_bom_options(project=None, txt=None):
     if project:
         bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
         if bom_project_field:
-            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1 AND is_active=1 AND is_default=1", (project,))
+            projects = parse_multi_filter(project)
+            if not projects: return []
+            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} IN ({','.join(['%s']*len(projects))}) AND docstatus=1 AND is_active=1 AND is_default=1", tuple(projects))
             valid_boms = set()
             
             def get_child_boms(bom_name):
@@ -598,7 +620,9 @@ def get_dynamic_item_options(project=None, bom=None, txt=None):
     elif project:
         bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
         if bom_project_field:
-            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1 AND is_active=1 AND is_default=1", (project,))
+            projects = parse_multi_filter(project)
+            if not projects: return []
+            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} IN ({','.join(['%s']*len(projects))}) AND docstatus=1 AND is_active=1 AND is_default=1", tuple(projects))
             valid_boms = set()
             
             def get_child_boms(bom_name):
@@ -620,10 +644,11 @@ def get_dynamic_item_options(project=None, bom=None, txt=None):
                 
     query_bom = f"SELECT item_code FROM `tabBOM Item` WHERE {bom_cond}"
     
-    proj_cond = "AND project = %s" if project else ""
+    projects = parse_multi_filter(project) if project else []
+    proj_cond = f"AND project IN ({','.join(['%s']*len(projects))})" if projects else ""
     query_po = f"SELECT item_code FROM `tabPurchase Order Item` WHERE docstatus = 1 {proj_cond}"
-    if project:
-        params.append(project)
+    if projects:
+        params.extend(projects)
         
     final_query = f"""
         SELECT DISTINCT item_code as value, item_code as description 
@@ -671,7 +696,9 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
     elif project:
         bom_project_field = "project" if frappe.db.has_column("BOM", "project") else ("custom_project" if frappe.db.has_column("BOM", "custom_project") else None)
         if bom_project_field:
-            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} = %s AND docstatus=1 AND is_active=1 AND is_default=1", (project,))
+            projects = parse_multi_filter(project)
+            if not projects: return []
+            top_boms = frappe.db.sql(f"SELECT name FROM `tabBOM` WHERE {bom_project_field} IN ({','.join(['%s']*len(projects))}) AND docstatus=1 AND is_active=1 AND is_default=1", tuple(projects))
             valid_boms = set()
             
             def get_child_boms(bom_name):
@@ -702,7 +729,8 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
         return frappe.db.sql(query, params + (f"%{txt}%", page_len, start))
         
     elif filter_type == "Purchase Order":
-        proj_cond = "AND poi.project = %s" if project else ""
+        projects = parse_multi_filter(project) if project else []
+        proj_cond = f"AND poi.project IN ({','.join(['%s']*len(projects))})" if projects else ""
         query = f"""
             SELECT DISTINCT po.name 
             FROM `tabPurchase Order` po
@@ -710,10 +738,12 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
             WHERE po.docstatus = 1 {proj_cond} AND po.name LIKE %s
             LIMIT %s OFFSET %s
         """
-        return frappe.db.sql(query, (project, f"%{txt}%", page_len, start) if project else (f"%{txt}%", page_len, start))
+        p = tuple(projects) + (f"%{txt}%", page_len, start) if projects else (f"%{txt}%", page_len, start)
+        return frappe.db.sql(query, p)
         
     elif filter_type == "Supplier":
-        proj_cond = "AND poi.project = %s" if project else ""
+        projects = parse_multi_filter(project) if project else []
+        proj_cond = f"AND poi.project IN ({','.join(['%s']*len(projects))})" if projects else ""
         query = f"""
             SELECT DISTINCT po.supplier 
             FROM `tabPurchase Order` po
@@ -721,7 +751,8 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
             WHERE po.docstatus = 1 {proj_cond} AND po.supplier LIKE %s
             LIMIT %s OFFSET %s
         """
-        return frappe.db.sql(query, (project, f"%{txt}%", page_len, start) if project else (f"%{txt}%", page_len, start))
+        p = tuple(projects) + (f"%{txt}%", page_len, start) if projects else (f"%{txt}%", page_len, start)
+        return frappe.db.sql(query, p)
         
     elif filter_type == "Brand":
         query = f"""
@@ -744,7 +775,8 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
         return frappe.db.sql(query, params + (f"%{txt}%", page_len, start))
         
     elif filter_type == "Warehouse":
-        proj_cond = "AND poi.project = %s" if project else ""
+        projects = parse_multi_filter(project) if project else []
+        proj_cond = f"AND poi.project IN ({','.join(['%s']*len(projects))})" if projects else ""
         query = f"""
             SELECT DISTINCT poi.warehouse 
             FROM `tabPurchase Order Item` poi
@@ -752,7 +784,8 @@ def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters
             WHERE po.docstatus = 1 {proj_cond} AND poi.warehouse LIKE %s
             LIMIT %s OFFSET %s
         """
-        return frappe.db.sql(query, (project, f"%{txt}%", page_len, start) if project else (f"%{txt}%", page_len, start))
+        p = tuple(projects) + (f"%{txt}%", page_len, start) if projects else (f"%{txt}%", page_len, start)
+        return frappe.db.sql(query, p)
         
     return frappe.db.sql(f"SELECT name FROM `tab{doctype}` WHERE name LIKE %s LIMIT %s OFFSET %s", (f"%{txt}%", page_len, start))
 
@@ -765,8 +798,10 @@ def apply_item_filters(rows, filters):
         match = True
         if filters.get("brand") and r.get("brand") != filters.get("brand"):
             match = False
-        if filters.get("item_group") and r.get("item_group") != filters.get("item_group"):
-            match = False
+        if filters.get("item_group"):
+            ig = parse_multi_filter(filters.get("item_group"))
+            if r.get("item_group") not in ig:
+                match = False
         if filters.get("supplier") and filters.get("supplier") not in (r.get("supplier") or ""):
             match = False
         if filters.get("purchase_order") and filters.get("purchase_order") not in (r.get("po_number") or ""):

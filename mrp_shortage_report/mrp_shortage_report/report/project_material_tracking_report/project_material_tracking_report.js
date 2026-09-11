@@ -3,8 +3,10 @@ frappe.query_reports["Project Material Tracking Report"] = {
 		{
 			"fieldname": "project",
 			"label": __("Project"),
-			"fieldtype": "Link",
-			"options": "Project"
+			"fieldtype": "MultiSelectList",
+			"get_data": function(txt) {
+				return frappe.db.get_link_options("Project", txt);
+			}
 		},
 		{
 			"fieldname": "bom",
@@ -16,7 +18,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 				return frappe.call({
 					method: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_bom_options",
 					args: {
-						project: project,
+						project: JSON.stringify(project || []),
 						txt: txt
 					}
 				}).then(r => r.message || []);
@@ -37,7 +39,7 @@ frappe.query_reports["Project Material Tracking Report"] = {
 				return frappe.call({
 					method: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_item_options",
 					args: {
-						project: frappe.query_report.get_filter_value('project'),
+						project: JSON.stringify(frappe.query_report.get_filter_value('project') || []),
 						bom: JSON.stringify(frappe.query_report.get_filter_value('bom') || []),
 						txt: txt
 					}
@@ -80,18 +82,25 @@ frappe.query_reports["Project Material Tracking Report"] = {
 		{
 			"fieldname": "item_group",
 			"label": __("Item Group"),
-			"fieldtype": "Link",
-			"options": "Item Group",
+			"fieldtype": "MultiSelectList",
 			"depends_on": "eval:doc.project",
-			"get_query": function() {
-				return {
-					query: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
-					filters: {
-						"filter_type": "Item Group",
-						"project": frappe.query_report.get_filter_value('project'),
-						"bom": JSON.stringify(frappe.query_report.get_filter_value('bom') || [])
+			"get_data": function(txt) {
+				let project = frappe.query_report.get_filter_value('project');
+				return frappe.call({
+					method: "mrp_shortage_report.mrp_shortage_report.report.project_material_tracking_report.project_material_tracking_report.get_dynamic_link_options",
+					args: {
+						doctype: "Item Group",
+						txt: txt,
+						searchfield: "name",
+						start: 0,
+						page_len: 50,
+						filters: {
+							"filter_type": "Item Group",
+							"project": project ? JSON.stringify(project) : null,
+							"bom": JSON.stringify(frappe.query_report.get_filter_value('bom') || [])
+						}
 					}
-				};
+				}).then(r => r.message || []);
 			}
 		},
 		{
