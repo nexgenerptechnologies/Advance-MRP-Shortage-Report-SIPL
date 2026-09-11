@@ -321,7 +321,13 @@ def fetch_demand(filters):
 
     for bom in top_level_boms:
         # Start the recursive fetch. Parent assembly is the top-level BOM item.
-        project_val = filters.get("project") or bom.project
+        # Use bom.project because filters.get("project") is now a list. 
+        # If bom.project is empty, we fall back to the first selected project if any.
+        project_val = bom.project
+        if not project_val and filters.get("project"):
+            projs = parse_multi_filter(filters.get("project"))
+            if projs: project_val = projs[0]
+            
         get_bom_components(bom.name, project_val, bom.name, bom.item, multiplier=1.0)
                 
     return rows
