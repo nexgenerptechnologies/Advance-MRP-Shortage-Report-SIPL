@@ -124,6 +124,7 @@ def get_columns():
     return [
         {"fieldname": "type", "label": _("Type"), "fieldtype": "Data", "width": 140},
         {"fieldname": "document_no", "label": _("Document No."), "fieldtype": "Dynamic Link", "options": "type", "width": 200},
+        {"fieldname": "supplier_invoice_no", "label": _("Supplier Invoice No."), "fieldtype": "Data", "width": 150},
         {"fieldname": "date", "label": _("Date"), "fieldtype": "Date", "width": 110},
         {"fieldname": "party_name", "label": _("Party Name"), "fieldtype": "Data", "width": 200},
         {"fieldname": "basic_value", "label": _("Basic Value"), "fieldtype": "Currency", "width": 140},
@@ -136,6 +137,7 @@ def get_purchase_invoices(project):
         SELECT
             'Purchase Invoice' as type,
             pi.name as document_no,
+            pi.bill_no as supplier_invoice_no,
             pi.posting_date as date,
             pi.supplier_name as party_name,
             SUM(pii.base_net_amount) as basic_value
