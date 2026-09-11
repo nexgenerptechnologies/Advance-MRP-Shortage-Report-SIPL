@@ -676,6 +676,13 @@ def get_dynamic_item_options(project=None, bom=None, txt=None):
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def get_dynamic_link_options(doctype, txt, searchfield, start, page_len, filters):
+    if isinstance(filters, str):
+        import json
+        try:
+            filters = json.loads(filters)
+        except:
+            filters = {}
+            
     filter_type = filters.get("filter_type")
     project = filters.get("project")
     bom_filter = filters.get("bom")
