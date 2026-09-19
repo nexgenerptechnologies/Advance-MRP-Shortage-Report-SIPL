@@ -33,6 +33,22 @@ frappe.query_reports["Project Document Summary"] = {
 				}
 			}
 		}
+		
+		// Make Linked Documents clickable
+		if (column.fieldname === "linked_documents" && value) {
+			let docs = value.split(",").map(d => d.trim());
+			let doctype = "";
+			if (data.type === "Purchase Order") {
+				doctype = "Purchase Invoice";
+			} else if (data.type === "Purchase Invoice") {
+				doctype = "Purchase Order";
+			}
+			
+			if (doctype) {
+				value = docs.map(d => `<a href="/app/${frappe.router.slug(doctype)}/${d}" style="font-weight: 500;">${d}</a>`).join(", ");
+			}
+		}
+		
 		return value;
 	}
 };
