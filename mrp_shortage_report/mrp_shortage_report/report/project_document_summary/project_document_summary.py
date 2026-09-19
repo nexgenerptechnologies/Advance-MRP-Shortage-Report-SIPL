@@ -124,6 +124,7 @@ def get_columns():
     return [
         {"fieldname": "type", "label": _("Type"), "fieldtype": "Data", "width": 140},
         {"fieldname": "document_no", "label": _("Document No."), "fieldtype": "Dynamic Link", "options": "type", "width": 200},
+        {"fieldname": "linked_documents", "label": _("Linked Documents"), "fieldtype": "Data", "width": 200},
         {"fieldname": "supplier_invoice_no", "label": _("Supplier Invoice No."), "fieldtype": "Data", "width": 150},
         {"fieldname": "date", "label": _("Date"), "fieldtype": "Date", "width": 110},
         {"fieldname": "party_name", "label": _("Party Name"), "fieldtype": "Data", "width": 200},
@@ -158,6 +159,14 @@ def get_purchase_invoices(project):
             r.gst = 0.0
         r.total = r.basic_value + r.gst
         
+        # Fetch linked Purchase Orders
+        linked_pos = frappe.db.sql("""
+            SELECT DISTINCT purchase_order 
+            FROM `tabPurchase Invoice Item`
+            WHERE parent = %s AND purchase_order IS NOT NULL AND purchase_order != ''
+        """, r.document_no)
+        r.linked_documents = ", ".join([p[0] for p in linked_pos]) if linked_pos else ""
+        
     return res
 
 def get_journal_entries(project):
@@ -188,6 +197,7 @@ def get_journal_entries(project):
             r.basic_value = val
             r.gst = 0.0
             r.total = val
+            r.linked_documents = ""
             final_res.append(r)
             
     return final_res
@@ -229,6 +239,14 @@ def get_purchase_orders(project, only_pending):
         else:
             r.gst = 0.0
         r.total = r.basic_value + r.gst
+        
+        # Fetch linked Purchase Invoices
+        linked_pis = frappe.db.sql("""
+            SELECT DISTINCT parent 
+            FROM `tabPurchase Invoice Item`
+            WHERE purchase_order = %s AND docstatus = 1
+        """, r.document_no)
+        r.linked_documents = ", ".join([p[0] for p in linked_pis]) if linked_pis else ""
         
     return res
 
@@ -272,5 +290,6 @@ def get_payment_entries(project):
     for r in res:
         r.gst = 0.0
         r.total = r.basic_value
+        r.linked_documents = ""
         
     return res
