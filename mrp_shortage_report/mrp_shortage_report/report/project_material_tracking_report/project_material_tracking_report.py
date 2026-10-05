@@ -90,23 +90,73 @@ def get_data(filters):
 
     # 3. Calculate logical allocations and true shortages per row
     stock_map = {}
-    balance_map = {}
+    project_received_map = {}
+    project_balance_map = {}
+    
     for r in all_rows:
         item = r["item_code"]
+        proj = r.get("project")
+        key = (item, proj)
+        
         if item not in stock_map:
             stock_map[item] = r["stock_qty"]
-        if item not in balance_map:
-            balance_map[item] = r["balance_qty"]
             
-    new_alt_rows = []
+        if key not in project_received_map:
+            project_received_map[key] = r.get("received_qty", 0)
+            
+        if key not in project_balance_map:
+            project_balance_map[key] = r.get("balance_qty", 0)
+            
+    # Reset row trackers
+    for r in all_rows:
+        r["allocated_qty"] = 0
+        r["shortage_qty"] = r.get("project_qty", 0)
+        r["net_shortage"] = r.get("project_qty", 0)
+        r["allocation_name"] = ""
 
+    # PASS 1: Dedicated Stock Allocation
     for r in all_rows:
         item = r["item_code"]
-        req = r.get("project_qty", 0)
+        proj = r.get("project")
+        key = (item, proj)
+        req = r["shortage_qty"]
         
-        # Check if we have an alternative with stock/balance
+        available_received = project_received_map.get(key, 0)
+        
+        if req > 0 and available_received > 0 and stock_map[item] > 0:
+            allocate_this = min(req, available_received, stock_map[item])
+            if allocate_this > 0:
+                r["allocated_qty"] += allocate_this
+                r["shortage_qty"] -= allocate_this
+                stock_map[item] -= allocate_this
+                project_received_map[key] -= allocate_this
+                r["allocation_name"] = proj or ""
+
+    # PASS 2: General Pool Stock Allocation
+    for r in all_rows:
+        item = r["item_code"]
+        req = r["shortage_qty"]
+        
+        if req > 0 and stock_map[item] > 0:
+            allocate_this = min(req, stock_map[item])
+            r["allocated_qty"] += allocate_this
+            r["shortage_qty"] -= allocate_this
+            stock_map[item] -= allocate_this
+            
+            if allocate_this > 0 and not r["allocation_name"]:
+                r["allocation_name"] = r.get("project") or ""
+
+    # PASS 3 & 4: Alternative Items and PO Balances
+    new_alt_rows = []
+    for r in all_rows:
+        item = r["item_code"]
+        proj = r.get("project")
+        key = (item, proj)
+        req = r["shortage_qty"]
+        
+        # Check Alternative Items
         used_alternative = None
-        if req > 0 and stock_map[item] + balance_map[item] < req:
+        if req > 0:
             if item in alt_map:
                 for alt_item in alt_map[item]:
                     alt_stock = get_stock_qty(alt_item, filters.get("warehouse"))
@@ -118,12 +168,11 @@ def get_data(filters):
                         break
                         
         if used_alternative:
-            r["allocated_qty"] = req
+            r["allocated_qty"] = r.get("project_qty", 0)
             r["shortage_qty"] = 0
             r["net_shortage"] = 0
             r["remarks"] = f"Alternative Item {used_alternative} used"
             
-            # Ensure the alternative item row is in the report
             alt_row = next((row for row in all_rows if row["item_code"] == used_alternative), None)
             if alt_row:
                 if not alt_row.get("remarks"):
@@ -152,31 +201,27 @@ def get_data(filters):
                         new_row["net_shortage"] = 0
                         new_alt_rows.append(new_row)
             continue
-        
-        # Normal Allocation
-        # Allocate Stock
-        if stock_map[item] >= req:
-            r["allocated_qty"] = req
-            r["shortage_qty"] = 0
-            stock_map[item] -= req
-            r["allocation_name"] = r.get("project") or ""
-        else:
-            r["allocated_qty"] = stock_map[item]
-            r["shortage_qty"] = req - stock_map[item]
-            if stock_map[item] > 0:
-                r["allocation_name"] = r.get("project") or ""
-            else:
-                r["allocation_name"] = ""
-            stock_map[item] = 0
             
-        # Allocate PO Balance against Shortage
-        shortage = r["shortage_qty"]
-        if balance_map[item] >= shortage:
-            r["net_shortage"] = 0
-            balance_map[item] -= shortage
+        # Allocate Dedicated PO Balance
+        req_net = r["shortage_qty"]
+        available_balance = project_balance_map.get(key, 0)
+        
+        if req_net > 0 and available_balance > 0:
+            allocate_this = min(req_net, available_balance)
+            r["net_shortage"] = req_net - allocate_this
+            project_balance_map[key] -= allocate_this
         else:
-            r["net_shortage"] = shortage - balance_map[item]
-            balance_map[item] = 0
+            r["net_shortage"] = req_net
+            
+        # Allocate Free Pool PO Balance
+        req_net = r["net_shortage"]
+        free_balance_key = (item, None)
+        available_free_balance = project_balance_map.get(free_balance_key, 0)
+        
+        if req_net > 0 and available_free_balance > 0:
+            allocate_this = min(req_net, available_free_balance)
+            r["net_shortage"] -= allocate_this
+            project_balance_map[free_balance_key] -= allocate_this
             
     all_rows.extend(new_alt_rows)
     
