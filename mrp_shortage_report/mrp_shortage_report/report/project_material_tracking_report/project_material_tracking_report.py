@@ -225,6 +225,17 @@ def get_data(filters):
             
     all_rows.extend(new_alt_rows)
     
+    # Recalculate true status after all allocations are final
+    for r in all_rows:
+        r["status"] = determine_status(
+            r.get("project_qty", 0),
+            r.get("allocated_qty", 0),
+            r.get("po_qty", 0),
+            r.get("received_qty", 0),
+            r.get("project"),
+            r.get("item_code")
+        )
+    
     # Apply PO Filter
     if filters.get("po_number"):
         all_rows = [r for r in all_rows if filters.get("po_number") in (r.get("po_number") or "")]
@@ -261,7 +272,7 @@ def get_data(filters):
                     
                 grouped[item]["status"] = determine_status(
                     grouped[item]["project_qty"],
-                    grouped[item]["stock_qty"],
+                    grouped[item]["allocated_qty"],
                     grouped[item]["po_qty"],
                     grouped[item]["received_qty"],
                     grouped[item].get("project"),
@@ -583,7 +594,7 @@ def get_po_details(item_code, project=None, warehouse=None, po_number=None):
     
     return po_numbers, po_dates, total_po_qty, total_received, suppliers, exp_dates, actual_delivery_dates
 
-def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None, item_code=None):
+def determine_status(req_qty, allocated_qty, po_qty, received_qty, project=None, item_code=None):
     if project:
         is_project_completed = frappe.db.get_value("Project", project, "status") == "Completed"
         has_invoice = frappe.db.exists("Sales Invoice", {"project": project, "docstatus": 1})
@@ -604,9 +615,9 @@ def determine_status(req_qty, stock_qty, po_qty, received_qty, project=None, ite
             if in_production:
                 return "In Production"
             
-    if req_qty > 0 and stock_qty >= req_qty:
+    if req_qty > 0 and allocated_qty >= req_qty:
         return "In Stock"
-    if received_qty >= (req_qty - stock_qty) and received_qty > 0:
+    if received_qty >= (req_qty - allocated_qty) and received_qty > 0:
         return "Fully Received"
     if received_qty > 0:
         return "Partially Received"
