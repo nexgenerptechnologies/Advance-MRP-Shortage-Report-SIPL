@@ -290,7 +290,7 @@ def get_data(filters):
 
 def get_sales_order_pending_qty(project, item_code, bom_name=None, filters=None):
     if not project and not (filters and filters.get("project")):
-        return 0.0
+        return 0.0, ""
         
     has_soi_project = frappe.db.has_column("Sales Order Item", "project")
     has_soi_bom = frappe.db.has_column("Sales Order Item", "bom_no")
@@ -356,28 +356,28 @@ def get_sales_order_pending_qty(project, item_code, bom_name=None, filters=None)
         where_item = ("AND (" + " OR ".join(item_c) + ")") if item_c else ""
         
         res_so = frappe.db.sql(f"""
-            SELECT SUM(COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
+            SELECT so.name as so_name, soi.item_code, (COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
             FROM `tabSales Order Item` soi
             INNER JOIN `tabSales Order` so ON soi.parent = so.name
             WHERE {" AND ".join(base_conditions)} AND so.name = %(so_name)s {where_item}
         """, val_so, as_dict=1)
         
-        if res_so and res_so[0].get("pending_qty"):
-            return float(res_so[0]["pending_qty"])
+        if not res_so:
+            res_so = frappe.db.sql(f"""
+                SELECT so.name as so_name, soi.item_code, (COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
+                FROM `tabSales Order Item` soi
+                INNER JOIN `tabSales Order` so ON soi.parent = so.name
+                WHERE {" AND ".join(base_conditions)} AND so.name = %(so_name)s
+            """, val_so, as_dict=1)
             
-        res_so_any = frappe.db.sql(f"""
-            SELECT SUM(COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
-            FROM `tabSales Order Item` soi
-            INNER JOIN `tabSales Order` so ON soi.parent = so.name
-            WHERE {" AND ".join(base_conditions)} AND so.name = %(so_name)s
-        """, val_so, as_dict=1)
-        
-        if res_so_any and res_so_any[0].get("pending_qty"):
-            return float(res_so_any[0]["pending_qty"])
+        if res_so:
+            total_qty = sum(r.pending_qty for r in res_so)
+            msg = f"SO: {linked_so} (Qty: {total_qty})"
+            return float(total_qty), msg
 
     # 4. Otherwise, match by Project tag on Sales Order for this specific project ID
     if not proj_id:
-        return 0.0
+        return 0.0, ""
         
     val_proj = {"proj_id": proj_id}
     if has_soi_project:
@@ -394,29 +394,53 @@ def get_sales_order_pending_qty(project, item_code, bom_name=None, filters=None)
         val_proj["bom_name"] = bom_name
         item_c.append("soi.bom_no = %(bom_name)s")
         
-    if item_c:
-        where_item = "(" + " OR ".join(item_c) + ")"
-        res_proj = frappe.db.sql(f"""
-            SELECT SUM(COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
-            FROM `tabSales Order Item` soi
-            INNER JOIN `tabSales Order` so ON soi.parent = so.name
-            WHERE {" AND ".join(base_conditions)} AND {proj_cond} AND {where_item}
-        """, val_proj, as_dict=1)
-        
-        if res_proj and res_proj[0].get("pending_qty"):
-            return float(res_proj[0]["pending_qty"])
-            
-    res_proj_any = frappe.db.sql(f"""
-        SELECT SUM(COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
+    where_item = ("(" + " OR ".join(item_c) + ")") if item_c else "1=1"
+    
+    res_rows = frappe.db.sql(f"""
+        SELECT so.name as so_name, so.transaction_date, soi.name as soi_name, soi.item_code, soi.item_name,
+               (COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
         FROM `tabSales Order Item` soi
         INNER JOIN `tabSales Order` so ON soi.parent = so.name
-        WHERE {" AND ".join(base_conditions)} AND {proj_cond}
+        WHERE {" AND ".join(base_conditions)} AND {proj_cond} AND {where_item}
+        ORDER BY so.transaction_date DESC, so.creation DESC, soi.idx ASC
     """, val_proj, as_dict=1)
     
-    if res_proj_any and res_proj_any[0].get("pending_qty"):
-        return float(res_proj_any[0]["pending_qty"])
+    if not res_rows:
+        res_rows = frappe.db.sql(f"""
+            SELECT so.name as so_name, so.transaction_date, soi.name as soi_name, soi.item_code, soi.item_name,
+                   (COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
+            FROM `tabSales Order Item` soi
+            INNER JOIN `tabSales Order` so ON soi.parent = so.name
+            WHERE {" AND ".join(base_conditions)} AND {proj_cond}
+            ORDER BY so.transaction_date DESC, so.creation DESC, soi.idx ASC
+        """, val_proj, as_dict=1)
         
-    return 0.0
+    if not res_rows:
+        return 0.0, ""
+        
+    # Group by Sales Order
+    by_so = {}
+    for r in res_rows:
+        by_so.setdefault(r.so_name, []).append(r)
+        
+    # Pick the latest active Sales Order for the project to prevent double-counting older or duplicate orders
+    latest_so = res_rows[0].so_name
+    latest_rows = by_so[latest_so]
+    
+    # Calculate quantity for the active Sales Order (distinct by item_code)
+    item_codes_seen = set()
+    so_qty = 0.0
+    for r in latest_rows:
+        if r.item_code not in item_codes_seen:
+            so_qty += float(r.pending_qty)
+            item_codes_seen.add(r.item_code)
+            
+    other_sos = [s for s in by_so.keys() if s != latest_so]
+    msg = f"SO: {latest_so} (Qty: {so_qty})"
+    if other_sos:
+        msg += f" [Other SOs: {', '.join(other_sos)}]"
+        
+    return float(so_qty), msg
 
 def fetch_demand(filters):
     rows = []
@@ -461,7 +485,7 @@ def fetch_demand(filters):
     processed_nodes = set()
 
     
-    def get_bom_components(bom_name, project_value, top_level_bom, parent_assembly, multiplier=1.0, visited_boms=None):
+    def get_bom_components(bom_name, project_value, top_level_bom, parent_assembly, multiplier=1.0, visited_boms=None, remarks=""):
         if visited_boms is None:
             visited_boms = set()
             
@@ -495,7 +519,8 @@ def fetch_demand(filters):
                     bom_qty=comp.bom_qty,
                     project_qty=actual_req_qty,
                     filters=filters,
-                    parent_assembly=bom_name
+                    parent_assembly=bom_name,
+                    remarks=remarks
                 )
                 if row:
                     rows.append(row)
@@ -503,7 +528,7 @@ def fetch_demand(filters):
             else:
                 child_bom_qty = frappe.db.get_value("BOM", child_bom, "quantity") or 1.0
                 new_multiplier = actual_req_qty / float(child_bom_qty)
-                get_bom_components(child_bom, project_value, top_level_bom, comp.item_code, new_multiplier, visited_boms)
+                get_bom_components(child_bom, project_value, top_level_bom, comp.item_code, new_multiplier, visited_boms, remarks=remarks)
 
     for bom in top_level_boms:
         # Start the recursive fetch. Parent assembly is the top-level BOM item.
@@ -518,13 +543,13 @@ def fetch_demand(filters):
         if bom_output_qty <= 0:
             bom_output_qty = 1.0
             
-        so_pending_qty = get_sales_order_pending_qty(project_val, bom.item, bom.name, filters=filters)
+        so_pending_qty, so_msg = get_sales_order_pending_qty(project_val, bom.item, bom.name, filters=filters)
         if so_pending_qty > 0:
             initial_multiplier = so_pending_qty / bom_output_qty
         else:
             initial_multiplier = 1.0
             
-        get_bom_components(bom.name, project_val, bom.name, bom.item, multiplier=initial_multiplier)
+        get_bom_components(bom.name, project_val, bom.name, bom.item, multiplier=initial_multiplier, remarks=so_msg)
                 
     return rows
 
@@ -609,7 +634,7 @@ def fetch_factory_stock(filters, demand_data):
                 
     return rows
 
-def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, project_qty, filters, parent_assembly=None):
+def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, project_qty, filters, parent_assembly=None, remarks=None):
     item_filters = filters.get("item_code")
     if item_filters:
         if isinstance(item_filters, str):
@@ -669,7 +694,7 @@ def build_row(item_code, project, bom_name, bom_date, bom_modified, bom_qty, pro
         "actual_delivery_date": actual_delivery_date,
         "net_shortage": net_shortage,
         "status": status,
-        "remarks": ""
+        "remarks": remarks or ""
     }
 
 def get_stock_qty(item_code, warehouse=None):
