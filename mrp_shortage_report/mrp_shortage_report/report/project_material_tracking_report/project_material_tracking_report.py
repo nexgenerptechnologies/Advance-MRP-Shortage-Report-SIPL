@@ -288,6 +288,47 @@ def get_data(filters):
         
     return all_rows
 
+def get_sales_order_pending_qty(project, item_code, bom_name=None):
+    if not project or not item_code:
+        return 0.0
+        
+    has_soi_project = frappe.db.has_column("Sales Order Item", "project")
+    has_soi_bom = frappe.db.has_column("Sales Order Item", "bom_no")
+    
+    conditions = [
+        "so.docstatus = 1",
+        "so.status NOT IN ('Closed', 'Cancelled', 'Completed')",
+        "COALESCE(soi.qty, 0) > COALESCE(soi.delivered_qty, 0)"
+    ]
+    values = {
+        "project": project,
+        "item_code": item_code
+    }
+    
+    if has_soi_project:
+        conditions.append("(soi.project = %(project)s OR (so.project = %(project)s AND (soi.project IS NULL OR soi.project = '')))")
+    else:
+        conditions.append("so.project = %(project)s")
+        
+    if has_soi_bom and bom_name:
+        conditions.append("(soi.item_code = %(item_code)s OR soi.bom_no = %(bom_name)s)")
+        values["bom_name"] = bom_name
+    else:
+        conditions.append("soi.item_code = %(item_code)s")
+        
+    query = f"""
+        SELECT SUM(COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
+        FROM `tabSales Order Item` soi
+        INNER JOIN `tabSales Order` so ON soi.parent = so.name
+        WHERE {" AND ".join(conditions)}
+    """
+    
+    result = frappe.db.sql(query, values, as_dict=1)
+    if result and result[0].get("pending_qty"):
+        return float(result[0]["pending_qty"])
+        
+    return 0.0
+
 def fetch_demand(filters):
     rows = []
     # Identify how Project Links to BOM. Using similar logic to advanced report
@@ -384,7 +425,17 @@ def fetch_demand(filters):
             projs = parse_multi_filter(filters.get("project"))
             if projs: project_val = projs[0]
             
-        get_bom_components(bom.name, project_val, bom.name, bom.item, multiplier=1.0)
+        bom_output_qty = float(bom.quantity or 1.0)
+        if bom_output_qty <= 0:
+            bom_output_qty = 1.0
+            
+        so_pending_qty = get_sales_order_pending_qty(project_val, bom.item, bom.name)
+        if so_pending_qty > 0:
+            initial_multiplier = so_pending_qty / bom_output_qty
+        else:
+            initial_multiplier = 1.0
+            
+        get_bom_components(bom.name, project_val, bom.name, bom.item, multiplier=initial_multiplier)
                 
     return rows
 
