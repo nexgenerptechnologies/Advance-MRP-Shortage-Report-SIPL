@@ -288,44 +288,116 @@ def get_data(filters):
         
     return all_rows
 
-def get_sales_order_pending_qty(project, item_code, bom_name=None):
-    if not project or not item_code:
+def get_sales_order_pending_qty(project, item_code, bom_name=None, filters=None):
+    if not project and not (filters and filters.get("project")):
         return 0.0
         
     has_soi_project = frappe.db.has_column("Sales Order Item", "project")
     has_soi_bom = frappe.db.has_column("Sales Order Item", "bom_no")
+    has_project_so = frappe.db.has_column("Project", "sales_order")
     
-    conditions = [
+    # 1. Resolve all possible representations of the Project (ID, Title/project_name)
+    project_keys = set()
+    if project:
+        project_keys.add(project)
+        
+    if filters and filters.get("project"):
+        for p in parse_multi_filter(filters.get("project")):
+            project_keys.add(p)
+            
+    linked_so_from_project = None
+    
+    # Search tabProject for all matching names and project_names
+    proj_search_values = tuple(project_keys)
+    if proj_search_values:
+        so_col = ", sales_order" if has_project_so else ""
+        format_strings = ','.join(['%s'] * len(proj_search_values))
+        proj_rows = frappe.db.sql(f"""
+            SELECT name, project_name {so_col}
+            FROM `tabProject`
+            WHERE name IN ({format_strings}) OR project_name IN ({format_strings})
+        """, proj_search_values + proj_search_values, as_dict=True)
+        
+        for prow in proj_rows:
+            if prow.get("name"): project_keys.add(prow["name"])
+            if prow.get("project_name"): project_keys.add(prow["project_name"])
+            if has_project_so and prow.get("sales_order"):
+                linked_so_from_project = prow["sales_order"]
+
+    # 2. Resolve all possible representations of the Item (Item Code and Item Name)
+    item_keys = set()
+    if item_code:
+        item_keys.add(item_code)
+        item_rows = frappe.db.sql("""
+            SELECT name, item_name 
+            FROM `tabItem` 
+            WHERE name = %s OR item_name = %s
+        """, (item_code, item_code), as_dict=True)
+        for irow in item_rows:
+            if irow.get("name"): item_keys.add(irow["name"])
+            if irow.get("item_name"): item_keys.add(irow["item_name"])
+            
+    # Base conditions for open Sales Orders
+    base_conditions = [
         "so.docstatus = 1",
         "so.status NOT IN ('Closed', 'Cancelled', 'Completed')",
         "COALESCE(soi.qty, 0) > COALESCE(soi.delivered_qty, 0)"
     ]
-    values = {
-        "project": project,
-        "item_code": item_code
-    }
     
-    if has_soi_project:
-        conditions.append("(soi.project = %(project)s OR (so.project = %(project)s AND (soi.project IS NULL OR soi.project = '')))")
-    else:
-        conditions.append("so.project = %(project)s")
+    # Project matching clause
+    proj_clause = []
+    proj_tuple = tuple(project_keys)
+    values = {}
+    
+    if proj_tuple:
+        values["proj_tuple"] = proj_tuple
+        if has_soi_project:
+            proj_clause.append("(soi.project IN %(proj_tuple)s OR (so.project IN %(proj_tuple)s AND (soi.project IS NULL OR soi.project = '')))")
+        else:
+            proj_clause.append("so.project IN %(proj_tuple)s")
+            
+    if linked_so_from_project:
+        values["linked_so"] = linked_so_from_project
+        proj_clause.append("so.name = %(linked_so)s")
+        
+    if not proj_clause:
+        return 0.0
+        
+    project_where = "(" + " OR ".join(proj_clause) + ")"
+    
+    # Priority 1: Match by Item Code, Item Name, or BOM No
+    item_clause = []
+    if item_keys:
+        values["item_tuple"] = tuple(item_keys)
+        item_clause.append("soi.item_code IN %(item_tuple)s")
+        item_clause.append("soi.item_name IN %(item_tuple)s")
         
     if has_soi_bom and bom_name:
-        conditions.append("(soi.item_code = %(item_code)s OR soi.bom_no = %(bom_name)s)")
         values["bom_name"] = bom_name
-    else:
-        conditions.append("soi.item_code = %(item_code)s")
+        item_clause.append("soi.bom_no = %(bom_name)s")
         
-    query = f"""
+    if item_clause:
+        item_where = "(" + " OR ".join(item_clause) + ")"
+        query1 = f"""
+            SELECT SUM(COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
+            FROM `tabSales Order Item` soi
+            INNER JOIN `tabSales Order` so ON soi.parent = so.name
+            WHERE {" AND ".join(base_conditions)} AND {project_where} AND {item_where}
+        """
+        result1 = frappe.db.sql(query1, values, as_dict=1)
+        if result1 and result1[0].get("pending_qty"):
+            return float(result1[0]["pending_qty"])
+            
+    # Priority 2: Fallback to all line items tagged to this Project in the Sales Order(s)
+    query2 = f"""
         SELECT SUM(COALESCE(soi.qty, 0) - COALESCE(soi.delivered_qty, 0)) as pending_qty
         FROM `tabSales Order Item` soi
         INNER JOIN `tabSales Order` so ON soi.parent = so.name
-        WHERE {" AND ".join(conditions)}
+        WHERE {" AND ".join(base_conditions)} AND {project_where}
     """
-    
-    result = frappe.db.sql(query, values, as_dict=1)
-    if result and result[0].get("pending_qty"):
-        return float(result[0]["pending_qty"])
+    result2 = frappe.db.sql(query2, values, as_dict=1)
+    if result2 and result2[0].get("pending_qty"):
+        return float(result2[0]["pending_qty"])
         
     return 0.0
 
@@ -429,7 +501,7 @@ def fetch_demand(filters):
         if bom_output_qty <= 0:
             bom_output_qty = 1.0
             
-        so_pending_qty = get_sales_order_pending_qty(project_val, bom.item, bom.name)
+        so_pending_qty = get_sales_order_pending_qty(project_val, bom.item, bom.name, filters=filters)
         if so_pending_qty > 0:
             initial_multiplier = so_pending_qty / bom_output_qty
         else:
