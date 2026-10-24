@@ -92,6 +92,7 @@ def get_data(filters):
     stock_map = {}
     project_received_map = {}
     project_balance_map = {}
+    po_info_map = {}
     
     for r in all_rows:
         item = r["item_code"]
@@ -106,6 +107,15 @@ def get_data(filters):
             
         if key not in project_balance_map:
             project_balance_map[key] = r.get("balance_qty", 0)
+
+        if key not in po_info_map and r.get("po_number"):
+            po_info_map[key] = {
+                "po_number": r.get("po_number"),
+                "po_date": r.get("po_date"),
+                "supplier": r.get("supplier"),
+                "exp_delivery_date": r.get("exp_delivery_date"),
+                "actual_delivery_date": r.get("actual_delivery_date"),
+            }
             
     # Reset row trackers
     for r in all_rows:
@@ -113,6 +123,14 @@ def get_data(filters):
         r["shortage_qty"] = r.get("project_qty", 0)
         r["net_shortage"] = r.get("project_qty", 0)
         r["allocation_name"] = ""
+        r["po_qty"] = 0.0
+        r["received_qty"] = 0.0
+        r["balance_qty"] = 0.0
+        r["po_number"] = ""
+        r["po_date"] = ""
+        r["supplier"] = ""
+        r["exp_delivery_date"] = ""
+        r["actual_delivery_date"] = ""
 
     # PASS 1: Dedicated Stock Allocation
     for r in all_rows:
@@ -129,8 +147,22 @@ def get_data(filters):
                 r["allocated_qty"] += allocate_this
                 r["shortage_qty"] -= allocate_this
                 stock_map[item] -= allocate_this
-                project_received_map[key] -= allocate_this
                 r["allocation_name"] = proj or ""
+
+        # Attribute received PO quantity to this row sequentially
+        if req > 0 and available_received > 0:
+            recv_to_attribute = min(req, available_received)
+            if recv_to_attribute > 0:
+                r["received_qty"] += recv_to_attribute
+                r["po_qty"] += recv_to_attribute
+                project_received_map[key] -= recv_to_attribute
+                if key in po_info_map and not r.get("po_number"):
+                    info = po_info_map[key]
+                    r["po_number"] = info.get("po_number") or ""
+                    r["po_date"] = info.get("po_date") or ""
+                    r["supplier"] = info.get("supplier") or ""
+                    r["exp_delivery_date"] = info.get("exp_delivery_date") or ""
+                    r["actual_delivery_date"] = info.get("actual_delivery_date") or ""
 
     # PASS 2: General Pool Stock Allocation
     for r in all_rows:
@@ -210,6 +242,16 @@ def get_data(filters):
             allocate_this = min(req_net, available_balance)
             r["net_shortage"] = req_net - allocate_this
             project_balance_map[key] -= allocate_this
+            
+            r["balance_qty"] += allocate_this
+            r["po_qty"] += allocate_this
+            if key in po_info_map and not r.get("po_number"):
+                info = po_info_map[key]
+                r["po_number"] = info.get("po_number") or ""
+                r["po_date"] = info.get("po_date") or ""
+                r["supplier"] = info.get("supplier") or ""
+                r["exp_delivery_date"] = info.get("exp_delivery_date") or ""
+                r["actual_delivery_date"] = info.get("actual_delivery_date") or ""
         else:
             r["net_shortage"] = req_net
             
@@ -222,6 +264,39 @@ def get_data(filters):
             allocate_this = min(req_net, available_free_balance)
             r["net_shortage"] -= allocate_this
             project_balance_map[free_balance_key] -= allocate_this
+            
+            r["balance_qty"] += allocate_this
+            r["po_qty"] += allocate_this
+            if free_balance_key in po_info_map and not r.get("po_number"):
+                info = po_info_map[free_balance_key]
+                r["po_number"] = info.get("po_number") or ""
+                r["po_date"] = info.get("po_date") or ""
+                r["supplier"] = info.get("supplier") or ""
+                r["exp_delivery_date"] = info.get("exp_delivery_date") or ""
+                r["actual_delivery_date"] = info.get("actual_delivery_date") or ""
+
+    # Allocate any remaining leftover PO quantities to the relevant rows so no PO qty is lost
+    for key, rem_received in list(project_received_map.items()):
+        rem_balance = project_balance_map.get(key, 0)
+        if rem_received > 0 or rem_balance > 0:
+            item, proj = key
+            target_row = next((r for r in reversed(all_rows) if r.get("item_code") == item and r.get("project") == proj), None)
+            if not target_row:
+                target_row = next((r for r in reversed(all_rows) if r.get("item_code") == item), None)
+                
+            if target_row:
+                target_row["received_qty"] += rem_received
+                target_row["balance_qty"] += rem_balance
+                target_row["po_qty"] += (rem_received + rem_balance)
+                if key in po_info_map and not target_row.get("po_number"):
+                    info = po_info_map[key]
+                    target_row["po_number"] = info.get("po_number") or ""
+                    target_row["po_date"] = info.get("po_date") or ""
+                    target_row["supplier"] = info.get("supplier") or ""
+                    target_row["exp_delivery_date"] = info.get("exp_delivery_date") or ""
+                    target_row["actual_delivery_date"] = info.get("actual_delivery_date") or ""
+            project_received_map[key] = 0
+            project_balance_map[key] = 0
             
     all_rows.extend(new_alt_rows)
     
@@ -257,6 +332,9 @@ def get_data(filters):
                 grouped[item]["allocated_qty"] += r.get("allocated_qty", 0)
                 grouped[item]["shortage_qty"] += r.get("shortage_qty", 0)
                 grouped[item]["net_shortage"] += r.get("net_shortage", 0)
+                grouped[item]["po_qty"] += r.get("po_qty", 0)
+                grouped[item]["received_qty"] += r.get("received_qty", 0)
+                grouped[item]["balance_qty"] += r.get("balance_qty", 0)
                 
                 if grouped[item].get("bom") != r.get("bom") and r.get("bom"):
                     grouped[item]["bom"] = "Multiple"
@@ -269,6 +347,30 @@ def get_data(filters):
                 if grouped[item].get("allocation_name") != r.get("allocation_name") and r.get("allocation_name"):
                     grouped[item]["allocation_name"] = "Multiple"
                     grouped[item]["project"] = "Multiple"
+
+                if r.get("po_number"):
+                    existing_pos = [p.strip() for p in (grouped[item].get("po_number") or "").split(",") if p.strip()]
+                    for p in r.get("po_number").split(","):
+                        p_str = p.strip()
+                        if p_str and p_str not in existing_pos:
+                            existing_pos.append(p_str)
+                    grouped[item]["po_number"] = ", ".join(existing_pos)
+
+                if r.get("po_date"):
+                    existing_dates = [d.strip() for d in (grouped[item].get("po_date") or "").split(",") if d.strip()]
+                    for d in str(r.get("po_date")).split(","):
+                        d_str = d.strip()
+                        if d_str and d_str not in existing_dates:
+                            existing_dates.append(d_str)
+                    grouped[item]["po_date"] = ", ".join(existing_dates)
+
+                if r.get("supplier"):
+                    existing_sups = [s.strip() for s in (grouped[item].get("supplier") or "").split(",") if s.strip()]
+                    for s in r.get("supplier").split(","):
+                        s_str = s.strip()
+                        if s_str and s_str not in existing_sups:
+                            existing_sups.append(s_str)
+                    grouped[item]["supplier"] = ", ".join(existing_sups)
                     
                 grouped[item]["status"] = determine_status(
                     grouped[item]["project_qty"],
@@ -760,7 +862,7 @@ def get_po_details(item_code, project=None, warehouse=None, po_number=None):
     return po_numbers, po_dates, total_po_qty, total_received, suppliers, exp_dates, actual_delivery_dates
 
 def determine_status(req_qty, allocated_qty, po_qty, received_qty, project=None, item_code=None):
-    if project:
+    if project and project != "Multiple":
         is_project_completed = frappe.db.get_value("Project", project, "status") == "Completed"
         has_invoice = frappe.db.exists("Sales Invoice", {"project": project, "docstatus": 1})
         if is_project_completed or has_invoice:
